@@ -12,6 +12,7 @@ type IxStatus = {
 type AppStatus = {
   app: string
   ixbrowser: IxStatus
+  browser_sessions?: number
 }
 
 type BrowserProfile = {
@@ -21,6 +22,18 @@ type BrowserProfile = {
   group_name?: string | null
   is_available: boolean
   last_seen_at: string
+}
+
+type BrowserSession = {
+  profile_id: number
+  attached: boolean
+  alive: boolean
+  opened_at: string
+  current_url?: string | null
+  title?: string | null
+  window_count?: number
+  already_open?: boolean
+  error?: string
 }
 
 type Account = {
@@ -73,9 +86,11 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
 function App() {
   const [status, setStatus] = useState<AppStatus | null>(null)
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
+  const [sessions, setSessions] = useState<BrowserSession[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [browserBusy, setBrowserBusy] = useState<number | null>(null)
   const [filter, setFilter] = useState('all')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -95,12 +110,17 @@ function App() {
     setProfiles(await api<BrowserProfile[]>('/api/browser-profiles'))
   }
 
+  const loadSessions = async () => {
+    const result = await api<{ items: BrowserSession[]; count: number }>('/api/browser-sessions')
+    setSessions(result.items)
+  }
+
   const loadAccounts = async () => {
     setAccounts(await api<Account[]>('/api/accounts'))
   }
 
   const refresh = async () => {
-    await Promise.all([loadStatus(), loadProfiles(), loadAccounts()])
+    await Promise.all([loadStatus(), loadProfiles(), loadSessions(), loadAccounts()])
   }
 
   useEffect(() => {
@@ -110,6 +130,11 @@ function App() {
   const filteredAccounts = useMemo(
     () => accounts.filter((account) => filter === 'all' || account.platform === filter),
     [accounts, filter],
+  )
+
+  const sessionByProfile = useMemo(
+    () => new Map(sessions.map((session) => [session.profile_id, session])),
+    [sessions],
   )
 
   const resetForm = () => {
@@ -134,6 +159,60 @@ function App() {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const openProfile = async (profile: BrowserProfile) => {
+    setBrowserBusy(profile.profile_id)
+    setMessage(null)
+    try {
+      const session = await api<BrowserSession>(`/api/browser-profiles/${profile.profile_id}/open`, {
+        method: 'POST',
+      })
+      await Promise.all([loadSessions(), loadStatus()])
+      setMessage(
+        session.already_open
+          ? `${profile.name} is already attached to Selenium.`
+          : `${profile.name} opened and Selenium attached successfully.`,
+      )
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBrowserBusy(null)
+    }
+  }
+
+  const probeProfile = async (profile: BrowserProfile) => {
+    setBrowserBusy(profile.profile_id)
+    setMessage(null)
+    try {
+      const session = await api<BrowserSession>(`/api/browser-profiles/${profile.profile_id}/probe`, {
+        method: 'POST',
+      })
+      await loadSessions()
+      const page = session.title || session.current_url || 'browser session'
+      setMessage(`${profile.name}: Selenium connection is healthy · ${page}`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+      await loadSessions().catch(() => undefined)
+    } finally {
+      setBrowserBusy(null)
+    }
+  }
+
+  const closeProfile = async (profile: BrowserProfile) => {
+    setBrowserBusy(profile.profile_id)
+    setMessage(null)
+    try {
+      await api<{ closed: boolean }>(`/api/browser-profiles/${profile.profile_id}/close`, {
+        method: 'POST',
+      })
+      await Promise.all([loadSessions(), loadStatus()])
+      setMessage(`${profile.name} closed.`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBrowserBusy(null)
     }
   }
 
@@ -238,7 +317,7 @@ function App() {
           <strong>{status?.ixbrowser.connected ? 'Connected' : status ? 'Offline' : 'Checking…'}</strong>
           <small>
             {status?.ixbrowser.connected
-              ? `${status.ixbrowser.total_profiles ?? 0} profiles detected`
+              ? `${status.ixbrowser.total_profiles ?? 0} profiles · ${sessions.length} Selenium attached`
               : status?.ixbrowser.message ?? '127.0.0.1:53200'}
           </small>
         </article>
@@ -247,6 +326,84 @@ function App() {
           <strong>{accounts.length}</strong>
           <small>{accounts.filter((item) => item.enabled).length} enabled</small>
         </article>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">BROWSER CONTROL</p>
+            <h2>iXBrowser profiles</h2>
+          </div>
+          <span className="section-meta">{sessions.length} Selenium sessions</span>
+        </div>
+
+        {profiles.length === 0 ? (
+          <div className="empty-state">
+            <strong>No synced profiles</strong>
+            <span>Start iXBrowser and sync profiles first.</span>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="browser-table">
+              <thead>
+                <tr>
+                  <th>Profile</th>
+                  <th>Group</th>
+                  <th>Selenium</th>
+                  <th>Current page</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {profiles.map((profile) => {
+                  const session = sessionByProfile.get(profile.profile_id)
+                  const isBusy = browserBusy === profile.profile_id
+                  return (
+                    <tr key={profile.profile_id}>
+                      <td>
+                        <div className="profile-cell">
+                          <strong>{profile.name}</strong>
+                          <small>#{profile.profile_id}</small>
+                        </div>
+                      </td>
+                      <td>{profile.group_name || '—'}</td>
+                      <td>
+                        <span className={`status-dot ${session?.alive ? '' : 'neutral'}`}></span>
+                        {session?.alive ? `Attached · ${session.window_count ?? 0} window(s)` : 'Not attached'}
+                      </td>
+                      <td className="url-cell" title={session?.current_url ?? ''}>
+                        {session?.title || session?.current_url || '—'}
+                      </td>
+                      <td className="actions browser-actions">
+                        <button
+                          className="compact-button"
+                          onClick={() => openProfile(profile)}
+                          disabled={isBusy || Boolean(session?.alive)}
+                        >
+                          {isBusy ? 'Working…' : 'Open'}
+                        </button>
+                        <button
+                          className="compact-button"
+                          onClick={() => probeProfile(profile)}
+                          disabled={isBusy || !session?.alive}
+                        >
+                          Check
+                        </button>
+                        <button
+                          className="compact-button danger-outline"
+                          onClick={() => closeProfile(profile)}
+                          disabled={isBusy}
+                        >
+                          Close
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="panel form-panel">
