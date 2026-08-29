@@ -25,7 +25,9 @@ frontend/dist/
 frontend/.vite/
 
 # Editors / OS
-.vscode/
+.vscode/*
+!.vscode/tasks.json
+!.vscode/settings.json
 .idea/
 .DS_Store
 Thumbs.db
