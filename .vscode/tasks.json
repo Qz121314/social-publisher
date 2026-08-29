@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Social Publisher: Auto Sync",
+      "label": "Social Publisher: Strict Source Mirror",
       "type": "shell",
       "command": "powershell",
       "args": [
