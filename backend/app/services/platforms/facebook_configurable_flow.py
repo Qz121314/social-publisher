@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import time
+from pathlib import Path
+from typing import Any, Iterable
+
 from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 
+from app.services.platforms.base import PlatformNeedsReviewError, PlatformPublishError
 from app.services.platforms.facebook_flow_config import load_facebook_flow
 from app.services.platforms.facebook_unified_flow import UnifiedFacebookFlowAdapter
 
@@ -54,13 +59,156 @@ class ConfigurableFacebookFlowAdapter(UnifiedFacebookFlowAdapter):
     def _SUCCESS_TEXT(self) -> tuple[str, ...]:  # noqa: N802
         return self._keywords("success_keywords")
 
-    def _media_is_busy(self, driver: Chrome, composer: WebElement) -> bool:
-        """Detect media-processing state without treating WebDriver as a WebElement.
+    def _upload_media(
+        self,
+        driver: Chrome,
+        composer: WebElement,
+        media: Iterable[Any],
+    ) -> None:
+        """Follow Facebook's visible media workflow before advancing the composer.
 
-        Selenium WebDriver supports ``find_elements`` but does not expose the
-        WebElement ``text`` property. For the document-wide fallback we therefore
-        read the visible text from ``body`` explicitly.
+        Facebook can keep hidden file inputs in the DOM before the user activates
+        the Photo/Video action. Sending files to one of those inputs can be ignored
+        by the current composer. For configured media posts we therefore always
+        activate the visible media action first, then send files to the input owned
+        by that state, and finally require evidence that Facebook actually attached
+        the media before Next/Post is allowed to advance.
         """
+
+        paths = [str(Path(item.path).resolve()) for item in media]
+        missing = [path for path in paths if not Path(path).is_file()]
+        if missing:
+            raise PlatformPublishError(f"本地媒体文件不存在：{missing[0]}")
+        if not paths:
+            return
+
+        before_media = self._media_signatures(composer)
+        before_input_ids = {item.id for item in self._acceptable_file_inputs(driver)}
+
+        media_button = self._find_media_button(driver, composer)
+        if media_button is None:
+            configured = " / ".join(self._MEDIA_TEXT[:6])
+            raise PlatformPublishError(
+                "Facebook 发帖界面已打开，但没有找到媒体入口。"
+                f"当前配置关键词：{configured or '-'}。"
+            )
+
+        self._safe_click(driver, media_button)
+        file_input = self._wait_media_file_input_after_activation(
+            driver,
+            composer,
+            before_input_ids,
+        )
+
+        try:
+            if file_input.get_attribute("multiple") is not None:
+                file_input.send_keys("\n".join(paths))
+            else:
+                for index, path in enumerate(paths):
+                    file_input.send_keys(path)
+                    if index < len(paths) - 1:
+                        file_input = self._wait_any_composer_file_input(driver, composer)
+        except WebDriverException as exc:
+            raise PlatformPublishError(f"Facebook 无法接收所选媒体文件：{exc}") from exc
+
+        self._wait_media_attached(driver, composer, file_input, before_media)
+        self._wait_media_processing(driver, composer)
+
+    def _wait_media_file_input_after_activation(
+        self,
+        driver: Chrome,
+        composer: WebElement,
+        before_ids: set[str],
+    ) -> WebElement:
+        end = time.monotonic() + 15
+        fallback: WebElement | None = None
+
+        while time.monotonic() < end:
+            local_inputs = self._acceptable_file_inputs(composer)
+            global_inputs = self._acceptable_file_inputs(driver)
+
+            for item in reversed(local_inputs + global_inputs):
+                try:
+                    if item.id not in before_ids:
+                        return item
+                    if fallback is None:
+                        fallback = item
+                except StaleElementReferenceException:
+                    continue
+
+            if fallback is not None and time.monotonic() + 1.5 >= end:
+                return fallback
+            time.sleep(0.2)
+
+        if fallback is not None:
+            return fallback
+        raise PlatformPublishError(
+            "已点击 Facebook“照片/视频”入口，但没有出现可用的文件上传控件。"
+        )
+
+    def _wait_media_attached(
+        self,
+        driver: Chrome,
+        composer: WebElement,
+        file_input: WebElement,
+        before_media: set[str],
+    ) -> None:
+        """Require attachment evidence before allowing Next/Post to proceed."""
+
+        end = time.monotonic() + 35
+        while time.monotonic() < end:
+            if self._has_security_challenge(driver):
+                raise PlatformNeedsReviewError(
+                    "Facebook 在添加媒体时打开了安全验证，请人工处理后再继续。"
+                )
+
+            try:
+                count = driver.execute_script(
+                    "return arguments[0].files ? arguments[0].files.length : 0;",
+                    file_input,
+                )
+                if isinstance(count, (int, float)) and count > 0:
+                    return
+            except (StaleElementReferenceException, WebDriverException):
+                pass
+
+            current_media = self._media_signatures(composer)
+            if current_media - before_media:
+                return
+
+            time.sleep(0.25)
+
+        raise PlatformPublishError(
+            "图片/视频文件已发送给 Facebook，但没有检测到媒体已附加或出现新的媒体预览，"
+            "因此没有继续点击“下一页”。"
+        )
+
+    @staticmethod
+    def _media_signatures(root: WebElement) -> set[str]:
+        signatures: set[str] = set()
+        try:
+            elements = root.find_elements(
+                By.CSS_SELECTOR,
+                "img[src], video[src], video[poster], video source[src]",
+            )
+        except (StaleElementReferenceException, WebDriverException):
+            return signatures
+
+        for element in elements:
+            try:
+                value = (
+                    element.get_attribute("src")
+                    or element.get_attribute("poster")
+                    or ""
+                ).strip()
+                if value:
+                    signatures.add(value)
+            except StaleElementReferenceException:
+                continue
+        return signatures
+
+    def _media_is_busy(self, driver: Chrome, composer: WebElement) -> bool:
+        """Detect media-processing state without treating WebDriver as a WebElement."""
 
         for root in (composer, driver):
             try:
