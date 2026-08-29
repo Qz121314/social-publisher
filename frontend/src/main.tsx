@@ -9,10 +9,16 @@ type IxStatus = {
   message?: string | null
 }
 
+type WorkerStats = {
+  max_workers: number
+  active_tasks: number
+}
+
 type AppStatus = {
   app: string
   ixbrowser: IxStatus
   browser_sessions?: number
+  worker?: WorkerStats
 }
 
 type BrowserProfile = {
@@ -34,6 +40,28 @@ type BrowserSession = {
   window_count?: number
   already_open?: boolean
   error?: string
+}
+
+type ProfileLock = {
+  profile_id: number
+  owner_id: string
+  task_id?: string | null
+  acquired_at: string
+  heartbeat_at: string
+  expires_at: string
+}
+
+type WorkerTask = {
+  id: string
+  task_type: string
+  profile_id: number
+  status: string
+  attempts: number
+  result?: Record<string, unknown> | string | null
+  error_message?: string | null
+  created_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
 }
 
 type Account = {
@@ -83,14 +111,21 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+function shortId(value?: string | null) {
+  return value ? value.slice(0, 8) : '—'
+}
+
 function App() {
   const [status, setStatus] = useState<AppStatus | null>(null)
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [sessions, setSessions] = useState<BrowserSession[]>([])
+  const [locks, setLocks] = useState<ProfileLock[]>([])
+  const [workerTasks, setWorkerTasks] = useState<WorkerTask[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [browserBusy, setBrowserBusy] = useState<number | null>(null)
+  const [workerBusy, setWorkerBusy] = useState<number | null>(null)
   const [filter, setFilter] = useState('all')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -115,16 +150,39 @@ function App() {
     setSessions(result.items)
   }
 
+  const loadLocks = async () => {
+    const result = await api<{ items: ProfileLock[]; count: number }>('/api/profile-locks')
+    setLocks(result.items)
+  }
+
+  const loadWorkerTasks = async () => {
+    const result = await api<{ items: WorkerTask[]; count: number }>('/api/worker/tasks?limit=20')
+    setWorkerTasks(result.items)
+  }
+
   const loadAccounts = async () => {
     setAccounts(await api<Account[]>('/api/accounts'))
   }
 
   const refresh = async () => {
-    await Promise.all([loadStatus(), loadProfiles(), loadSessions(), loadAccounts()])
+    await Promise.all([
+      loadStatus(),
+      loadProfiles(),
+      loadSessions(),
+      loadLocks(),
+      loadWorkerTasks(),
+      loadAccounts(),
+    ])
   }
 
   useEffect(() => {
     refresh().catch((error: Error) => setMessage(error.message))
+
+    const timer = window.setInterval(() => {
+      Promise.all([loadStatus(), loadSessions(), loadLocks(), loadWorkerTasks()]).catch(() => undefined)
+    }, 2500)
+
+    return () => window.clearInterval(timer)
   }, [])
 
   const filteredAccounts = useMemo(
@@ -135,6 +193,16 @@ function App() {
   const sessionByProfile = useMemo(
     () => new Map(sessions.map((session) => [session.profile_id, session])),
     [sessions],
+  )
+
+  const lockByProfile = useMemo(
+    () => new Map(locks.map((lock) => [lock.profile_id, lock])),
+    [locks],
+  )
+
+  const profileById = useMemo(
+    () => new Map(profiles.map((profile) => [profile.profile_id, profile])),
+    [profiles],
   )
 
   const resetForm = () => {
@@ -213,6 +281,22 @@ function App() {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
       setBrowserBusy(null)
+    }
+  }
+
+  const runWorkerTest = async (profile: BrowserProfile) => {
+    setWorkerBusy(profile.profile_id)
+    setMessage(null)
+    try {
+      const task = await api<WorkerTask>(`/api/worker/test/${profile.profile_id}`, {
+        method: 'POST',
+      })
+      await Promise.all([loadWorkerTasks(), loadLocks(), loadStatus()])
+      setMessage(`${profile.name}: worker task ${shortId(task.id)} queued.`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setWorkerBusy(null)
     }
   }
 
@@ -322,6 +406,11 @@ function App() {
           </small>
         </article>
         <article className="stat-card">
+          <span>Worker Pool</span>
+          <strong>{status?.worker ? `${status.worker.active_tasks}/${status.worker.max_workers}` : '—'}</strong>
+          <small>{locks.length} profile lock(s) active</small>
+        </article>
+        <article className="stat-card">
           <span>Accounts</span>
           <strong>{accounts.length}</strong>
           <small>{accounts.filter((item) => item.enabled).length} enabled</small>
@@ -334,7 +423,7 @@ function App() {
             <p className="eyebrow">BROWSER CONTROL</p>
             <h2>iXBrowser profiles</h2>
           </div>
-          <span className="section-meta">{sessions.length} Selenium sessions</span>
+          <span className="section-meta">{sessions.length} Selenium sessions · {locks.length} locked</span>
         </div>
 
         {profiles.length === 0 ? (
@@ -349,6 +438,7 @@ function App() {
                 <tr>
                   <th>Profile</th>
                   <th>Group</th>
+                  <th>Lock</th>
                   <th>Selenium</th>
                   <th>Current page</th>
                   <th></th>
@@ -357,7 +447,9 @@ function App() {
               <tbody>
                 {profiles.map((profile) => {
                   const session = sessionByProfile.get(profile.profile_id)
+                  const profileLock = lockByProfile.get(profile.profile_id)
                   const isBusy = browserBusy === profile.profile_id
+                  const isWorkerBusy = workerBusy === profile.profile_id
                   return (
                     <tr key={profile.profile_id}>
                       <td>
@@ -368,6 +460,15 @@ function App() {
                       </td>
                       <td>{profile.group_name || '—'}</td>
                       <td>
+                        {profileLock ? (
+                          <span className="lock-badge" title={profileLock.owner_id}>
+                            Locked · {shortId(profileLock.task_id)}
+                          </span>
+                        ) : (
+                          <span className="idle-label">Idle</span>
+                        )}
+                      </td>
+                      <td>
                         <span className={`status-dot ${session?.alive ? '' : 'neutral'}`}></span>
                         {session?.alive ? `Attached · ${session.window_count ?? 0} window(s)` : 'Not attached'}
                       </td>
@@ -376,27 +477,88 @@ function App() {
                       </td>
                       <td className="actions browser-actions">
                         <button
+                          className="compact-button worker-button"
+                          onClick={() => runWorkerTest(profile)}
+                          disabled={isWorkerBusy || Boolean(profileLock)}
+                        >
+                          {isWorkerBusy ? 'Queueing…' : 'Worker Test'}
+                        </button>
+                        <button
                           className="compact-button"
                           onClick={() => openProfile(profile)}
-                          disabled={isBusy || Boolean(session?.alive)}
+                          disabled={isBusy || Boolean(session?.alive) || Boolean(profileLock)}
                         >
                           {isBusy ? 'Working…' : 'Open'}
                         </button>
                         <button
                           className="compact-button"
                           onClick={() => probeProfile(profile)}
-                          disabled={isBusy || !session?.alive}
+                          disabled={isBusy || !session?.alive || Boolean(profileLock)}
                         >
                           Check
                         </button>
                         <button
                           className="compact-button danger-outline"
                           onClick={() => closeProfile(profile)}
-                          disabled={isBusy}
+                          disabled={isBusy || Boolean(profileLock)}
                         >
                           Close
                         </button>
                       </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">EXECUTION</p>
+            <h2>Recent worker tasks</h2>
+          </div>
+          <span className="section-meta">Max concurrency {status?.worker?.max_workers ?? 3}</span>
+        </div>
+
+        {workerTasks.length === 0 ? (
+          <div className="empty-state compact-empty">
+            <strong>No worker tasks yet</strong>
+            <span>Run a Worker Test on any synced iX profile.</span>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="worker-table">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Profile</th>
+                  <th>Status</th>
+                  <th>Attempts</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workerTasks.map((task) => {
+                  const profile = profileById.get(task.profile_id)
+                  const resultTitle =
+                    typeof task.result === 'object' && task.result !== null
+                      ? String(task.result.title ?? task.result.current_url ?? 'Completed')
+                      : task.error_message || (typeof task.result === 'string' ? task.result : '—')
+                  return (
+                    <tr key={task.id}>
+                      <td>
+                        <div className="profile-cell">
+                          <strong>{shortId(task.id)}</strong>
+                          <small>{task.task_type}</small>
+                        </div>
+                      </td>
+                      <td>{profile?.name || `#${task.profile_id}`}</td>
+                      <td><span className={`task-status task-${task.status}`}>{task.status}</span></td>
+                      <td>{task.attempts}</td>
+                      <td className="result-cell" title={resultTitle}>{resultTitle}</td>
                     </tr>
                   )
                 })}
