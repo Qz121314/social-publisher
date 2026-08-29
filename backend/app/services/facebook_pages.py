@@ -99,6 +99,12 @@ def discover_managed_facebook_pages(driver: Chrome) -> list[dict[str, str]]:
 
     targets: dict[str, dict[str, str]] = {}
 
+    # `/me` resolves to the currently active Facebook identity. When an account
+    # is acting as a Page, that can be the Page rather than the human account.
+    # `c_user` identifies the underlying logged-in Facebook account, while
+    # `i_user` may represent an impersonated/Page identity. Resolve the personal
+    # profile from `c_user` first so the scan remains correct even when the UI is
+    # currently switched into a Page.
     personal = _discover_personal_profile(driver)
     if personal is not None:
         targets[f"profile:{personal['target_id']}"] = personal
@@ -135,6 +141,11 @@ def discover_managed_facebook_pages(driver: Chrome) -> list[dict[str, str]]:
             continue
         target_url, target_id = normalized
 
+        # Never let the personal account discovered via c_user be reclassified
+        # as a Page just because the managed-pages DOM links to the same ID.
+        if personal is not None and target_id == personal["target_id"]:
+            continue
+
         key = f"page:{target_id}"
         existing = targets.get(key)
         if existing is None or len(name) < len(existing["target_name"]):
@@ -160,6 +171,30 @@ def discover_managed_facebook_pages(driver: Chrome) -> list[dict[str, str]]:
 
 
 def _discover_personal_profile(driver: Chrome) -> dict[str, str] | None:
+    c_user = _facebook_cookie_value(driver, "c_user")
+    if c_user:
+        personal_url = urlunparse(
+            ("https", "www.facebook.com", "/profile.php", "", urlencode({"id": c_user}), "")
+        )
+        try:
+            driver.get(personal_url)
+            _wait_ready(driver)
+        except WebDriverException:
+            return _discover_personal_profile_via_me(driver)
+
+        _raise_for_auth_flow(driver)
+        return {
+            "target_type": "profile",
+            "target_id": c_user,
+            "target_name": _extract_profile_name(driver),
+            "target_url": personal_url,
+            "source": "facebook_c_user",
+        }
+
+    return _discover_personal_profile_via_me(driver)
+
+
+def _discover_personal_profile_via_me(driver: Chrome) -> dict[str, str] | None:
     try:
         driver.get(MY_PROFILE_URL)
         _wait_ready(driver)
@@ -172,15 +207,55 @@ def _discover_personal_profile(driver: Chrome) -> dict[str, str] | None:
         return None
 
     target_url, target_id = normalized
-    title = _clean_facebook_title(driver.title or "")
-    name = title or "个人主页"
     return {
         "target_type": "profile",
         "target_id": target_id,
-        "target_name": name[:255],
+        "target_name": _extract_profile_name(driver),
         "target_url": target_url,
-        "source": "facebook_me",
+        "source": "facebook_me_fallback",
     }
+
+
+def _facebook_cookie_value(driver: Chrome, name: str) -> str | None:
+    try:
+        cookie = driver.get_cookie(name)
+    except WebDriverException:
+        return None
+    if not cookie:
+        return None
+    value = str(cookie.get("value") or "").strip()
+    return value or None
+
+
+def _extract_profile_name(driver: Chrome) -> str:
+    selectors = (
+        "meta[property='og:title']",
+        "meta[name='title']",
+    )
+    for selector in selectors:
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+        except WebDriverException:
+            elements = []
+        for element in elements:
+            value = " ".join((element.get_attribute("content") or "").split()).strip()
+            if value and value.casefold() != "facebook":
+                return value[:255]
+
+    try:
+        headings = driver.find_elements(By.CSS_SELECTOR, "h1")
+    except WebDriverException:
+        headings = []
+    for heading in headings:
+        try:
+            value = " ".join((heading.text or "").split()).strip()
+            if value:
+                return value[:255]
+        except StaleElementReferenceException:
+            continue
+
+    title = _clean_facebook_title(driver.title or "")
+    return (title or "个人主页")[:255]
 
 
 def _wait_ready(driver: Chrome) -> None:
