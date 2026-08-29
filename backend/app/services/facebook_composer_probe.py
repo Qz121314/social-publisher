@@ -5,7 +5,7 @@ from typing import Any
 from selenium.webdriver import Chrome
 
 from app.services.platforms.base import PlatformContent
-from app.services.platforms.facebook_target import TargetActorFacebookAdapter
+from app.services.platforms.facebook_surface import FacebookSurfaceAdapter
 
 
 def confirm_facebook_composer_entry(
@@ -16,15 +16,16 @@ def confirm_facebook_composer_entry(
     target_url: str,
     target_type: str | None = None,
 ) -> dict[str, Any]:
-    """Behavior-confirm the real Facebook composer entry for one target actor.
+    """Behavior-confirm the real Facebook create-post surface for one target actor.
 
-    Personal profiles and Pages use the exact same confirmation flow. The target
-    type is carried only as metadata. The confirmation does not type content and
-    never clicks the final Post button. A result is successful only when clicking
-    an entry produces both a real editable composer and a visible Post button.
+    Personal profiles and Pages use the exact same flow. The target type is only
+    display metadata. Confirmation never types content and never clicks the final
+    Post action. Success requires the real Facebook create-post surface, a visible
+    editor, and a visible Post action; the Post action may be disabled while the
+    editor is empty.
     """
 
-    adapter = TargetActorFacebookAdapter()
+    adapter = FacebookSurfaceAdapter()
     content = PlatformContent(
         text="confirmation-only",
         media=(),
