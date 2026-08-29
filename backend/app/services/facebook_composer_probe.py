@@ -5,7 +5,7 @@ from typing import Any
 from selenium.webdriver import Chrome
 
 from app.services.platforms.base import PlatformContent
-from app.services.platforms.facebook_surface_precise import PreciseFacebookSurfaceAdapter
+from app.services.platforms.facebook_unified_flow import UnifiedFacebookFlowAdapter
 
 
 def confirm_facebook_composer_entry(
@@ -16,16 +16,14 @@ def confirm_facebook_composer_entry(
     target_url: str,
     target_type: str | None = None,
 ) -> dict[str, Any]:
-    """Behavior-confirm the real Facebook create-post surface for one target actor.
+    """Confirm the current Facebook composer flow for one target actor.
 
-    Personal profiles and Pages use the exact same flow. The target type is only
-    display metadata. Confirmation never types content and never clicks the final
-    Post action. Success requires the real Facebook create-post surface, a visible
-    editor, and a visible Post action; the Post action may be disabled while the
-    editor is empty.
+    Personal profiles and Pages use the same state machine. The current composer
+    may expose a final Post action immediately or a staged Next -> Post flow.
+    Confirmation never types content and never clicks the final publish action.
     """
 
-    adapter = PreciseFacebookSurfaceAdapter()
+    adapter = UnifiedFacebookFlowAdapter()
     content = PlatformContent(
         text="confirmation-only",
         media=(),
@@ -37,8 +35,6 @@ def confirm_facebook_composer_entry(
     return adapter.confirm_composer_entry(driver, content)
 
 
-# Backward-compatible alias while the UI/API migrates from "probe" wording to
-# the stricter behavior-confirmation model.
 def probe_facebook_composer_entry(
     driver: Chrome,
     *,
