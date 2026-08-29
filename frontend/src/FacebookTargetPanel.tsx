@@ -17,11 +17,11 @@ type PublishTarget = {
   target_url: string
 }
 
-type PageCandidate = {
+type TargetCandidate = {
   id: number
   profile_id: number
   platform: string
-  target_type: string
+  target_type: 'profile' | 'page'
   target_id: string
   target_name: string
   target_url: string
@@ -32,7 +32,7 @@ type PageCandidate = {
 type ScanResult = {
   profile_id: number
   count: number
-  items: PageCandidate[]
+  items: TargetCandidate[]
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -49,10 +49,14 @@ async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>
 }
 
+function targetTypeLabel(value: string) {
+  return value === 'profile' ? '个人主页' : '公共主页'
+}
+
 export default function FacebookTargetPanel() {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [targets, setTargets] = useState<PublishTarget[]>([])
-  const [candidates, setCandidates] = useState<PageCandidate[]>([])
+  const [candidates, setCandidates] = useState<TargetCandidate[]>([])
   const [selectedCandidate, setSelectedCandidate] = useState<Record<number, number>>({})
   const [message, setMessage] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -63,7 +67,7 @@ export default function FacebookTargetPanel() {
   )
 
   const candidatesByProfile = useMemo(() => {
-    const result = new Map<number, PageCandidate[]>()
+    const result = new Map<number, TargetCandidate[]>()
     candidates.forEach((candidate) => {
       const list = result.get(candidate.profile_id) ?? []
       list.push(candidate)
@@ -80,7 +84,7 @@ export default function FacebookTargetPanel() {
     ])
     const loadedProfiles = await readJson<BrowserProfile[]>(profileResponse)
     const loadedTargets = await readJson<PublishTarget[]>(targetResponse)
-    const loadedCandidates = await readJson<PageCandidate[]>(candidateResponse)
+    const loadedCandidates = await readJson<TargetCandidate[]>(candidateResponse)
     setProfiles(loadedProfiles)
     setTargets(loadedTargets)
     setCandidates(loadedCandidates)
@@ -88,18 +92,18 @@ export default function FacebookTargetPanel() {
     setSelectedCandidate((current) => {
       const next = { ...current }
       loadedProfiles.forEach((profile) => {
-        const pages = loadedCandidates.filter((item) => item.profile_id === profile.profile_id)
-        if (pages.length === 0) {
+        const availableTargets = loadedCandidates.filter((item) => item.profile_id === profile.profile_id)
+        if (availableTargets.length === 0) {
           delete next[profile.profile_id]
           return
         }
         const currentTarget = loadedTargets.find((item) => item.profile_id === profile.profile_id)
         const targetMatch = currentTarget
-          ? pages.find((item) => item.target_id === currentTarget.target_id)
+          ? availableTargets.find((item) => item.target_id === currentTarget.target_id)
           : undefined
-        const selectedStillExists = pages.some((item) => item.id === next[profile.profile_id])
+        const selectedStillExists = availableTargets.some((item) => item.id === next[profile.profile_id])
         if (!selectedStillExists) {
-          next[profile.profile_id] = targetMatch?.id ?? pages[0].id
+          next[profile.profile_id] = targetMatch?.id ?? availableTargets[0].id
         }
       })
       return next
@@ -125,9 +129,9 @@ export default function FacebookTargetPanel() {
     }
   }
 
-  const scanPages = async (profile: BrowserProfile) => {
+  const scanTargets = async (profile: BrowserProfile) => {
     setBusyId(profile.profile_id)
-    setMessage(`正在扫描 iX ${profile.name} 可发布的 Facebook 公共主页…`)
+    setMessage(`正在扫描 iX ${profile.name} 的 Facebook 个人主页和公共主页…`)
     try {
       const result = await readJson<ScanResult>(
         await fetch(`/api/browser-profiles/${profile.profile_id}/facebook-pages/scan`, {
@@ -145,7 +149,9 @@ export default function FacebookTargetPanel() {
           [profile.profile_id]: targetMatch?.id ?? result.items[0].id,
         }))
       }
-      setMessage(`iX ${profile.name} 扫描完成，共读取到 ${result.count} 个可发布公共主页。`)
+      const personalCount = result.items.filter((item) => item.target_type === 'profile').length
+      const pageCount = result.items.filter((item) => item.target_type === 'page').length
+      setMessage(`iX ${profile.name} 扫描完成：个人主页 ${personalCount} 个，公共主页 ${pageCount} 个。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -156,7 +162,7 @@ export default function FacebookTargetPanel() {
   const setDefault = async (profile: BrowserProfile) => {
     const candidateId = selectedCandidate[profile.profile_id]
     if (!candidateId) {
-      setMessage(`请先扫描 iX ${profile.name}，并选择一个 Facebook 公共主页。`)
+      setMessage(`请先扫描 iX ${profile.name}，并选择一个 Facebook 个人主页或公共主页。`)
       return
     }
 
@@ -205,7 +211,7 @@ export default function FacebookTargetPanel() {
           <div>
             <span className="target-kicker">Facebook 发布安全</span>
             <h2>每个 iX 的默认发布主页</h2>
-            <p>点击“扫描公共主页”后，系统会打开对应 iX 并读取这个 Facebook 登录账号可管理、可作为发布目标的公共主页。扫描结果不会自动改变发布目标，必须由你明确选择并设为默认。</p>
+            <p>系统只扫描两类真实发布身份：当前 Facebook 账号的个人主页，以及该账号可管理的公共主页。创建帖子、广告中心、消息等功能入口会被过滤。扫描结果不会自动改变发布目标，必须由你明确选择并设为默认。</p>
           </div>
           <button className="target-refresh" onClick={() => load().catch((error: Error) => setMessage(error.message))}>
             刷新
@@ -217,7 +223,7 @@ export default function FacebookTargetPanel() {
         <div className="target-list">
           {profiles.filter((profile) => profile.is_available).map((profile, index) => {
             const target = targetByProfile.get(profile.profile_id)
-            const pages = candidatesByProfile.get(profile.profile_id) ?? []
+            const availableTargets = candidatesByProfile.get(profile.profile_id) ?? []
             const busy = busyId === profile.profile_id
             const selectedId = selectedCandidate[profile.profile_id] ?? 0
             return (
@@ -235,7 +241,7 @@ export default function FacebookTargetPanel() {
                     <>
                       <span className="target-label">当前默认</span>
                       <strong>{target.target_name}</strong>
-                      <small>{target.target_type === 'page' ? '公共主页' : '个人主页'} · {target.target_id}</small>
+                      <small>{targetTypeLabel(target.target_type)} · {target.target_id}</small>
                       <a href={target.target_url} target="_blank" rel="noreferrer">查看目标</a>
                     </>
                   ) : (
@@ -249,31 +255,31 @@ export default function FacebookTargetPanel() {
 
                 <div className="target-discovery">
                   <div className="target-discovery-head">
-                    <strong>扫描到的公共主页</strong>
-                    <span>{pages.length > 0 ? `${pages.length} 个` : '尚未扫描'}</span>
+                    <strong>扫描到的发布主页</strong>
+                    <span>{availableTargets.length > 0 ? `${availableTargets.length} 个` : '尚未扫描'}</span>
                   </div>
                   <select
                     value={selectedId || ''}
-                    disabled={busy || pages.length === 0}
+                    disabled={busy || availableTargets.length === 0}
                     onChange={(event) => setSelectedCandidate((current) => ({
                       ...current,
                       [profile.profile_id]: Number(event.target.value),
                     }))}
                   >
-                    {pages.length === 0 && <option value="">请先扫描公共主页</option>}
-                    {pages.map((page) => (
-                      <option key={page.id} value={page.id}>
-                        {page.target_name} · {page.target_id}
+                    {availableTargets.length === 0 && <option value="">请先扫描发布主页</option>}
+                    {availableTargets.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {targetTypeLabel(candidate.target_type)} · {candidate.target_name} · {candidate.target_id}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div className="target-actions">
-                  <button disabled={busy} onClick={() => scanPages(profile)}>
-                    {busy ? '处理中…' : '扫描公共主页'}
+                  <button disabled={busy} onClick={() => scanTargets(profile)}>
+                    {busy ? '处理中…' : '扫描发布主页'}
                   </button>
-                  <button className="target-primary" disabled={busy || pages.length === 0} onClick={() => setDefault(profile)}>
+                  <button className="target-primary" disabled={busy || availableTargets.length === 0} onClick={() => setDefault(profile)}>
                     设为默认
                   </button>
                   <button disabled={busy} onClick={() => openProfile(profile)}>
