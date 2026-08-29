@@ -4,8 +4,14 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    MoveTargetOutOfBoundsException,
+    StaleElementReferenceException,
+    WebDriverException,
+)
 from selenium.webdriver import Chrome
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 
@@ -93,7 +99,7 @@ class ConfigurableFacebookFlowAdapter(UnifiedFacebookFlowAdapter):
                 f"当前配置关键词：{configured or '-'}。"
             )
 
-        self._safe_click(driver, media_button)
+        self._activate_media_button(driver, media_button)
         file_input = self._wait_media_file_input_after_activation(
             driver,
             composer,
@@ -113,6 +119,64 @@ class ConfigurableFacebookFlowAdapter(UnifiedFacebookFlowAdapter):
 
         self._wait_media_attached(driver, composer, file_input, before_media)
         self._wait_media_processing(driver, composer)
+
+    def _activate_media_button(self, driver: Chrome, button: WebElement) -> None:
+        """Activate the already-confirmed Facebook Photo/Video control.
+
+        Facebook frequently layers an internal transparent container over visible
+        composer controls. Native Selenium clicking may therefore be intercepted
+        even when the correct role=button/aria-label element has been identified.
+        Keep the target fixed, try a normal pointer interaction first, then use a
+        DOM click only on that same verified control. Subsequent media-state checks
+        still have to succeed before the workflow may continue.
+        """
+
+        try:
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
+                button,
+            )
+            time.sleep(0.2)
+        except WebDriverException:
+            pass
+
+        try:
+            ActionChains(driver).move_to_element(button).pause(0.15).click().perform()
+            return
+        except (
+            ElementClickInterceptedException,
+            MoveTargetOutOfBoundsException,
+            WebDriverException,
+        ):
+            pass
+
+        try:
+            button.click()
+            return
+        except (ElementClickInterceptedException, WebDriverException):
+            pass
+
+        try:
+            clicked = driver.execute_script(
+                """
+                const el = arguments[0];
+                if (!el || !el.isConnected) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                el.click();
+                return true;
+                """,
+                button,
+            )
+        except WebDriverException as exc:
+            raise PlatformPublishError(
+                f"Facebook 已定位到“照片/视频”按钮，但无法触发该按钮：{exc}"
+            ) from exc
+
+        if not clicked:
+            raise PlatformPublishError(
+                "Facebook 已定位到“照片/视频”按钮，但该按钮当前不可交互。"
+            )
 
     def _wait_media_file_input_after_activation(
         self,
