@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.models.account import BrowserProfile
 from app.models.content import ContentItem, MediaAsset, PublishJob
-from app.schemas.content import ContentRead
+from app.schemas.content import ContentRead, PublishJobRead
 from app.services.content_store import (
     MediaValidationError,
     delete_media,
@@ -22,6 +22,7 @@ from app.services.content_store import (
 )
 from app.services.platforms.base import PlatformContent, PlatformMedia, PlatformValidationError
 from app.services.platforms.registry import get_platform_adapter, list_platforms
+from app.services.worker import worker_manager, worker_task_to_dict
 
 router = APIRouter(tags=["content"])
 
@@ -150,9 +151,75 @@ async def create_content(
     return _get_content_or_404(db, content.id)
 
 
+@router.post(
+    "/contents/{content_id}/run",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def run_content_now(content_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    content = _get_content_or_404(db, content_id)
+    runnable = [job.id for job in content.jobs if job.status in {"draft", "failed"}]
+    if not runnable:
+        review_count = sum(1 for job in content.jobs if job.status == "needs_review")
+        detail = "No runnable publish jobs remain for this content."
+        if review_count:
+            detail += f" {review_count} job(s) require manual review before retrying."
+        raise HTTPException(status_code=409, detail=detail)
+
+    queued: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    for job_id in runnable:
+        try:
+            task = worker_manager.submit_publish_job(job_id)
+            queued.append(worker_task_to_dict(task))
+        except ValueError as exc:
+            errors.append({"job_id": job_id, "error": str(exc)})
+
+    if not queued:
+        raise HTTPException(status_code=409, detail="No publish jobs could be queued.")
+    return {
+        "content_id": content_id,
+        "queued": queued,
+        "queued_count": len(queued),
+        "errors": errors,
+    }
+
+
+@router.get("/publish-jobs", response_model=list[PublishJobRead])
+def list_publish_jobs(
+    job_status: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> list[PublishJob]:
+    statement = select(PublishJob).order_by(PublishJob.created_at.desc()).limit(limit)
+    if job_status:
+        statement = statement.where(PublishJob.status == job_status.strip().lower())
+    return list(db.scalars(statement).all())
+
+
+@router.post(
+    "/publish-jobs/{job_id}/run",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def run_publish_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    if db.get(PublishJob, job_id) is None:
+        raise HTTPException(status_code=404, detail="Publish job not found.")
+    try:
+        task = worker_manager.submit_publish_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return worker_task_to_dict(task)
+
+
 @router.delete("/contents/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_content(content_id: str, db: Session = Depends(get_db)) -> Response:
     content = _get_content_or_404(db, content_id)
+    active = [job for job in content.jobs if job.status in {"queued", "running"}]
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail="Content cannot be deleted while publish jobs are queued or running.",
+        )
+
     stored_names = [asset.stored_name for asset in content.media]
     db.delete(content)
     db.commit()
