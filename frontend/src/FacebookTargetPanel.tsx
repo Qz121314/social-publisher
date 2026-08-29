@@ -54,6 +54,8 @@ type ConfirmResult = {
   actor_id: string
   editor_confirmed: boolean
   post_button_confirmed: boolean
+  next_button_confirmed?: boolean
+  primary_action?: string
   confirmed_at: string
 }
 
@@ -158,7 +160,7 @@ export default function FacebookTargetPanel() {
       await readJson(
         await fetch(`/api/browser-profiles/${profile.profile_id}/open`, { method: 'POST' }),
       )
-      setMessage(`iX ${profile.name} 已打开。需要登录或处理 Facebook 验证时，可以在这个窗口里人工完成。`)
+      setMessage(`iX ${profile.name} 已打开。需要登录或处理 Facebook 验证时，可直接在这个窗口中人工完成。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -168,7 +170,7 @@ export default function FacebookTargetPanel() {
 
   const scanTargets = async (profile: BrowserProfile) => {
     setBusyId(profile.profile_id)
-    setMessage(`正在扫描 iX ${profile.name} 的 Facebook 发布目标…`)
+    setMessage(`正在扫描 iX ${profile.name} 的 Facebook 发布身份…`)
     try {
       const result = await readJson<ScanResult>(
         await fetch(`/api/browser-profiles/${profile.profile_id}/facebook-pages/scan`, {
@@ -186,7 +188,7 @@ export default function FacebookTargetPanel() {
           [profile.profile_id]: targetMatch?.id ?? result.items[0].id,
         }))
       }
-      setMessage(`iX ${profile.name} 扫描完成：发现 ${result.items.length} 个 Facebook 发布目标。`)
+      setMessage(`iX ${profile.name} 扫描完成：发现 ${result.items.length} 个可用 Facebook 发布身份。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -197,7 +199,7 @@ export default function FacebookTargetPanel() {
   const setDefault = async (profile: BrowserProfile) => {
     const candidateId = selectedCandidate[profile.profile_id]
     if (!candidateId) {
-      setMessage(`请先扫描 iX ${profile.name}，并选择一个 Facebook 发布目标。`)
+      setMessage(`请先扫描 iX ${profile.name}，并选择一个 Facebook 发布身份。`)
       return
     }
 
@@ -211,7 +213,7 @@ export default function FacebookTargetPanel() {
         ),
       )
       await load()
-      setMessage(`iX ${profile.name} 的默认 Facebook 发布目标已设置为：${target.target_name}。请确认发帖入口后再进行发布测试。`)
+      setMessage(`iX ${profile.name} 的默认发布目标已设置为：${target.target_name}。发布时系统会强制校验 actor ID；如页面结构异常可运行“诊断发帖界面”。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -227,7 +229,7 @@ export default function FacebookTargetPanel() {
     }
 
     setBusyId(profile.profile_id)
-    setMessage(`正在确认 iX ${profile.name} / ${target.target_name} 的真实发帖入口。不会输入内容，也不会点击发布…`)
+    setMessage(`正在诊断 iX ${profile.name} / ${target.target_name} 的 Facebook 发帖界面。不会输入内容，也不会点击最终发布…`)
     try {
       const result = await readJson<ConfirmResult>(
         await fetch(`/api/browser-profiles/${profile.profile_id}/facebook-composer/confirm`, {
@@ -235,9 +237,8 @@ export default function FacebookTargetPanel() {
         }),
       )
       await load()
-      setMessage(
-        `发帖入口确认成功：目标 ID ${result.target_id}，当前身份 ID ${result.actor_id}，编辑器和发布按钮均已确认。`,
-      )
+      const actionLabel = result.primary_action === 'next' ? '下一步' : '最终发布'
+      setMessage(`发帖界面诊断成功：目标 ID ${result.target_id}，当前身份 ID ${result.actor_id}，编辑器和“${actionLabel}”动作均已识别。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -270,12 +271,12 @@ export default function FacebookTargetPanel() {
       <section className="target-panel">
         <div className="target-heading">
           <div>
-            <span className="target-kicker">Facebook 发布安全</span>
-            <h2>每个 iX 的默认发布目标</h2>
-            <p>个人主页和公共主页统一视为 Facebook 发布目标。系统最终只认 target ID：当前 Facebook actor ID 必须与目标 ID 完全一致。设为默认后，还必须通过“确认发帖入口”行为验证，确认真实编辑器与发布按钮都存在。</p>
+            <span className="target-kicker">FACEBOOK TARGETS</span>
+            <h2>Facebook 发布目标</h2>
+            <p>个人主页和公共主页统一视为“发布身份”。页面名称只用于显示和导航，真正的发布门禁始终是 target ID：当前 Facebook actor ID 必须与目标 ID 完全一致。</p>
           </div>
           <button className="target-refresh" onClick={() => load().catch((error: Error) => setMessage(error.message))}>
-            刷新
+            刷新数据
           </button>
         </div>
 
@@ -307,7 +308,7 @@ export default function FacebookTargetPanel() {
                       <strong>{target.target_name}</strong>
                       <small>{targetTypeLabel(target.target_type)} · ID {target.target_id}</small>
                       <small className={confirmation ? 'target-confirmed' : 'target-unconfirmed'}>
-                        发帖入口：{confirmation ? '已确认' : '未确认'}
+                        发帖界面：{confirmation ? '已诊断' : '未诊断'}
                       </small>
                       <a href={target.target_url} target="_blank" rel="noreferrer">查看目标</a>
                     </>
@@ -322,7 +323,7 @@ export default function FacebookTargetPanel() {
 
                 <div className="target-discovery">
                   <div className="target-discovery-head">
-                    <strong>扫描到的发布目标</strong>
+                    <strong>扫描到的发布身份</strong>
                     <span>{availableTargets.length > 0 ? `${availableTargets.length} 个` : '尚未扫描'}</span>
                   </div>
                   <select
@@ -333,7 +334,7 @@ export default function FacebookTargetPanel() {
                       [profile.profile_id]: Number(event.target.value),
                     }))}
                   >
-                    {availableTargets.length === 0 && <option value="">请先扫描发布目标</option>}
+                    {availableTargets.length === 0 && <option value="">请先扫描发布身份</option>}
                     {availableTargets.map((candidate) => (
                       <option key={candidate.id} value={candidate.id}>
                         {targetTypeLabel(candidate.target_type)} · {candidate.target_name} · {candidate.target_id}
@@ -344,14 +345,14 @@ export default function FacebookTargetPanel() {
 
                 <div className="target-actions">
                   <button disabled={busy} onClick={() => scanTargets(profile)}>
-                    {busy ? '处理中…' : '扫描发布目标'}
+                    {busy ? '处理中…' : '扫描发布身份'}
                   </button>
                   <button className="target-primary" disabled={busy || availableTargets.length === 0} onClick={() => setDefault(profile)}>
                     设为默认
                   </button>
                   {target && (
                     <button className="target-confirm" disabled={busy} onClick={() => confirmComposer(profile)}>
-                      {confirmation ? '重新确认发帖入口' : '确认发帖入口'}
+                      {confirmation ? '重新诊断' : '诊断发帖界面'}
                     </button>
                   )}
                   <button disabled={busy} onClick={() => openProfile(profile)}>
