@@ -25,7 +25,7 @@
 
 .target-heading p {
   margin: 0;
-  max-width: 900px;
+  max-width: 980px;
   color: #647084;
   line-height: 1.65;
 }
@@ -56,6 +56,16 @@
   cursor: not-allowed;
 }
 
+.target-actions .target-primary {
+  border-color: #315d9f;
+  background: #315d9f;
+  color: #fff;
+}
+
+.target-actions .target-primary:hover:not(:disabled) {
+  background: #274d86;
+}
+
 .target-notice {
   border: 1px solid #cfd8e6;
   background: #f6f9fd;
@@ -70,8 +80,8 @@
 
 .target-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.2fr) minmax(420px, 1.8fr);
-  gap: 22px;
+  grid-template-columns: minmax(190px, .9fr) minmax(230px, 1fr) minmax(300px, 1.35fr) minmax(300px, 1.35fr);
+  gap: 20px;
   align-items: center;
   padding: 18px 0;
   border-bottom: 1px solid #e3e7ee;
@@ -90,7 +100,8 @@
 }
 
 .target-profile strong,
-.target-current strong {
+.target-current strong,
+.target-discovery strong {
   display: block;
 }
 
@@ -99,6 +110,14 @@
   display: block;
   margin-top: 4px;
   color: #7a8495;
+}
+
+.target-label {
+  display: block;
+  margin-bottom: 4px;
+  color: #8993a4;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .target-current {
@@ -116,6 +135,31 @@
   font-size: 13px;
 }
 
+.target-discovery {
+  min-width: 0;
+}
+
+.target-discovery-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.target-discovery-head span {
+  color: #7a8495;
+  font-size: 13px;
+}
+
+.target-discovery select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #cfd6e2;
+  background: #fff;
+  padding: 7px 9px;
+  font: inherit;
+}
+
 .target-actions {
   display: flex;
   justify-content: flex-end;
@@ -128,12 +172,33 @@
   border-color: #efc8c5;
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 1180px) {
   .target-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .target-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .target-shell {
+    padding: 0 12px;
+  }
+
+  .target-panel {
+    padding: 20px 16px;
+  }
+
+  .target-heading,
+  .target-row {
+    display: block;
+  }
+
+  .target-current,
+  .target-discovery,
+  .target-actions {
+    margin-top: 16px;
   }
 }
