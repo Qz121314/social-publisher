@@ -240,6 +240,44 @@
   border-radius: 6px;
 }
 
+.admin-main input,
+.admin-main select,
+.admin-main textarea,
+.admin-main .media-picker,
+.admin-main .profile-selector,
+.admin-main .selected-media {
+  border-radius: 6px;
+}
+
+.admin-main input:focus,
+.admin-main select:focus,
+.admin-main textarea:focus {
+  border-color: #6d8fb9;
+  box-shadow: 0 0 0 3px rgba(73, 116, 168, .08);
+}
+
+.admin-main .profile-selector {
+  overflow: hidden;
+  background: #fbfcfd;
+}
+
+.admin-main .profile-option.selected {
+  background: #f2f6fb;
+}
+
+.admin-main .media-picker {
+  border-color: #d8dee7;
+  background: #fbfcfd;
+}
+
+.admin-main .platform-pill,
+.admin-main .task-status,
+.admin-main .lock-badge,
+.admin-main .media-summary a,
+.admin-main .media-kind {
+  border-radius: 5px;
+}
+
 .admin-main table {
   border-collapse: separate;
   border-spacing: 0;
@@ -254,9 +292,21 @@
   padding-left: 14px;
 }
 
+.admin-main tbody tr:hover td {
+  background: #fcfdfe;
+}
+
 .admin-main .notice,
 .admin-main .target-notice {
   border-radius: 7px;
+}
+
+.admin-main .section-heading h2 {
+  font-size: 20px;
+}
+
+.admin-main .section-meta {
+  font-size: 11px;
 }
 
 @media (max-width: 1040px) {
