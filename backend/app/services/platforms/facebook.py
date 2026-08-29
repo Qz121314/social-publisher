@@ -13,7 +13,6 @@ from selenium.common.exceptions import (
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from app.services.platforms.base import (
@@ -26,12 +25,10 @@ from app.services.platforms.base import (
 
 
 class FacebookAdapter(PlatformAdapter):
-    """Facebook desktop-web publishing adapter.
+    """Facebook desktop-web publishing adapter for authorized iX profiles.
 
-    This adapter automates normal Facebook composer controls in an already
-    authenticated iXBrowser profile. It deliberately does not handle CAPTCHA,
-    checkpoint, account recovery, or any other platform security challenge.
-    Such states are surfaced as `needs_review` to the worker layer.
+    CAPTCHA, checkpoint, account recovery and other security challenges are not
+    automated. They are surfaced as `needs_review`.
     """
 
     capabilities = PlatformCapabilities(
@@ -62,12 +59,7 @@ class FacebookAdapter(PlatformAdapter):
         "图片/视频",
     )
     _POST_TEXT = ("Post", "发布")
-    _UPLOAD_BUSY_TEXT = (
-        "Uploading",
-        "Processing",
-        "正在上传",
-        "正在处理",
-    )
+    _UPLOAD_BUSY_TEXT = ("Uploading", "Processing", "正在上传", "正在处理")
     _SUCCESS_TEXT = (
         "Your post was shared",
         "Post published",
@@ -83,15 +75,7 @@ class FacebookAdapter(PlatformAdapter):
         lowered = current_url.lower()
 
         needs_login = any(marker in lowered for marker in ("/login", "login.php"))
-        checkpoint = any(
-            marker in lowered
-            for marker in (
-                "/checkpoint",
-                "/recover",
-                "/two_step_verification",
-            )
-        )
-
+        checkpoint = self._has_security_challenge(driver)
         if not needs_login and not checkpoint:
             needs_login = bool(
                 driver.find_elements(By.CSS_SELECTOR, "input[name='email'], input[name='pass']")
@@ -119,12 +103,12 @@ class FacebookAdapter(PlatformAdapter):
                 "Facebook is not logged in for this iX profile. Log in manually before retrying."
             )
 
+        # Everything before the final click is safe to classify as failed/retryable.
         try:
             composer = self._open_composer(driver)
             self._fill_text(composer, content.text)
             if content.media:
                 self._upload_media(driver, composer, content.media)
-
             post_button = self._wait_post_ready(driver, composer)
             self._safe_click(driver, post_button)
         except PlatformNeedsReviewError:
@@ -136,32 +120,37 @@ class FacebookAdapter(PlatformAdapter):
         except WebDriverException as exc:
             raise PlatformPublishError(f"Facebook browser automation failed before submission: {exc}") from exc
 
+        # After the Post click, any uncertainty is `needs_review`. Retrying from
+        # here automatically could duplicate a post that Facebook already accepted.
         try:
             self._wait_composer_closed(driver, composer)
-        except TimeoutException as exc:
+            verification = self._verify_submission(driver, content)
+            current_url = driver.current_url
+            title = driver.title
+        except PlatformNeedsReviewError:
+            raise
+        except Exception as exc:
             raise PlatformNeedsReviewError(
-                "Facebook received the Post click, but the composer did not close in time. Review the account before retrying to avoid a duplicate post.",
+                "Facebook received the Post click, but the browser became uncertain before verification completed. Review Facebook before retrying to avoid a duplicate post.",
                 submitted=True,
             ) from exc
 
-        verification = self._verify_submission(driver, content)
         return {
             "platform": "facebook",
             "submitted": True,
             "verified": verification["verified"],
             "published_url": verification.get("published_url"),
             "verification": verification["message"],
-            "current_url": driver.current_url,
-            "title": driver.title,
+            "current_url": current_url,
+            "title": title,
         }
 
     def _ensure_facebook(self, driver: Chrome) -> None:
-        current_url = driver.current_url or ""
-        if "facebook.com" not in current_url.lower():
+        if "facebook.com" not in (driver.current_url or "").lower():
             driver.get(self.HOME_URL)
-
         WebDriverWait(driver, self.DEFAULT_TIMEOUT).until(
-            lambda browser: browser.execute_script("return document.readyState") in ("interactive", "complete")
+            lambda browser: browser.execute_script("return document.readyState")
+            in ("interactive", "complete")
         )
 
     def _open_composer(self, driver: Chrome) -> WebElement:
@@ -174,19 +163,18 @@ class FacebookAdapter(PlatformAdapter):
         )
         self._safe_click(driver, opener)
 
-        def new_dialog(browser: Chrome) -> WebElement | bool:
-            dialogs = self._visible_dialogs(browser)
+        def find_dialog(_: Chrome) -> WebElement | bool:
+            dialogs = self._visible_dialogs(driver)
             for dialog in dialogs:
                 if dialog not in dialog_before:
                     return dialog
             return dialogs[-1] if dialogs else False
 
-        return WebDriverWait(driver, self.DEFAULT_TIMEOUT).until(new_dialog)
+        return WebDriverWait(driver, self.DEFAULT_TIMEOUT).until(find_dialog)
 
     def _fill_text(self, composer: WebElement, text: str) -> None:
         if not text:
             return
-
         textbox = self._find_descendant(
             composer,
             (
@@ -209,7 +197,7 @@ class FacebookAdapter(PlatformAdapter):
         if missing:
             raise PlatformPublishError(f"Local media file is missing: {missing[0]}")
 
-        file_input = self._find_file_input(composer)
+        file_input = self._find_file_input(composer) or self._find_file_input(driver)
         if file_input is None:
             media_button = self._find_by_text_role(
                 composer,
@@ -218,16 +206,16 @@ class FacebookAdapter(PlatformAdapter):
                 timeout=8,
             )
             self._safe_click(driver, media_button)
-            file_input = self._wait_file_input(composer)
+            file_input = self._wait_file_input(driver, composer)
 
         try:
             if file_input.get_attribute("multiple") is not None:
                 file_input.send_keys("\n".join(paths))
             else:
-                for path in paths:
+                for index, path in enumerate(paths):
                     file_input.send_keys(path)
-                    if path != paths[-1]:
-                        file_input = self._wait_file_input(composer)
+                    if index < len(paths) - 1:
+                        file_input = self._wait_file_input(driver, composer)
         except WebDriverException as exc:
             raise PlatformPublishError(f"Facebook could not accept the selected media files: {exc}") from exc
 
@@ -243,7 +231,6 @@ class FacebookAdapter(PlatformAdapter):
                     "Facebook opened a security/checkpoint flow while media was uploading. Review the profile manually."
                 )
 
-            busy = False
             try:
                 busy = any(
                     element.is_displayed()
@@ -252,24 +239,15 @@ class FacebookAdapter(PlatformAdapter):
                 if not busy:
                     composer_text = composer.text.lower()
                     busy = any(marker.lower() in composer_text for marker in self._UPLOAD_BUSY_TEXT)
-            except StaleElementReferenceException:
-                raise PlatformPublishError("Facebook composer disappeared while media was uploading.")
+            except StaleElementReferenceException as exc:
+                raise PlatformPublishError("Facebook composer disappeared while media was uploading.") from exc
 
             if busy:
                 last_busy_at = time.monotonic()
             else:
-                try:
-                    button = self._find_post_button(composer)
-                    if button is not None and self._is_enabled(button):
-                        return
-                except StaleElementReferenceException:
-                    pass
-
-                # Some uploads do not expose a progressbar. Give the DOM a short
-                # stabilization window before treating the enabled Post button as ready.
-                if time.monotonic() - last_busy_at >= 2.0:
-                    button = self._find_post_button(composer)
-                    if button is not None and self._is_enabled(button):
+                button = self._find_post_button(composer)
+                if button is not None and self._is_enabled(button):
+                    if time.monotonic() - last_busy_at >= 1.5:
                         return
 
             time.sleep(0.5)
@@ -277,20 +255,26 @@ class FacebookAdapter(PlatformAdapter):
         raise TimeoutException("Facebook media processing timed out.")
 
     def _wait_post_ready(self, driver: Chrome, composer: WebElement) -> WebElement:
+        timeout = self.MEDIA_TIMEOUT if self._composer_has_media(composer) else self.DEFAULT_TIMEOUT
+
         def ready(_: Chrome) -> WebElement | bool:
             if self._has_security_challenge(driver):
                 raise PlatformNeedsReviewError(
                     "Facebook opened a security/checkpoint flow before publishing. Review the profile manually."
                 )
             button = self._find_post_button(composer)
-            if button is not None and self._is_enabled(button):
-                return button
-            return False
+            return button if button is not None and self._is_enabled(button) else False
 
-        return WebDriverWait(driver, self.MEDIA_TIMEOUT if self._composer_has_media(composer) else self.DEFAULT_TIMEOUT).until(ready)
+        return WebDriverWait(driver, timeout).until(ready)
 
     def _wait_composer_closed(self, driver: Chrome, composer: WebElement) -> None:
-        WebDriverWait(driver, 45).until(EC.staleness_of(composer))
+        def closed(_: Chrome) -> bool:
+            try:
+                return not composer.is_displayed()
+            except StaleElementReferenceException:
+                return True
+
+        WebDriverWait(driver, 45).until(closed)
 
     def _verify_submission(self, driver: Chrome, content: PlatformContent) -> dict[str, Any]:
         end = time.monotonic() + self.VERIFY_TIMEOUT
@@ -304,22 +288,22 @@ class FacebookAdapter(PlatformAdapter):
                     "message": "Facebook opened a checkpoint after submission; manual review is required.",
                 }
 
-            body_text = ""
             try:
                 body_text = driver.find_element(By.TAG_NAME, "body").text
+                articles = driver.find_elements(By.CSS_SELECTOR, "div[role='article']")[:12]
             except WebDriverException:
-                pass
+                body_text = ""
+                articles = []
 
-            lowered_body = body_text.lower()
-            if any(marker.lower() in lowered_body for marker in self._SUCCESS_TEXT):
+            if any(marker.lower() in body_text.lower() for marker in self._SUCCESS_TEXT):
                 return {
                     "verified": True,
-                    "published_url": self._find_recent_permalink(driver, text_probe),
+                    "published_url": self._find_recent_permalink(articles, text_probe),
                     "message": "Facebook displayed a post-submission success/processing confirmation.",
                 }
 
             if text_probe:
-                for article in driver.find_elements(By.CSS_SELECTOR, "div[role='article']")[:12]:
+                for article in articles:
                     try:
                         article_text = " ".join(article.text.split()).lower()
                     except StaleElementReferenceException:
@@ -339,13 +323,11 @@ class FacebookAdapter(PlatformAdapter):
             "message": "The composer closed after submission, but the new post could not be independently located in the feed within the verification window.",
         }
 
-    def _find_recent_permalink(self, driver: Chrome, text_probe: str) -> str | None:
-        for article in driver.find_elements(By.CSS_SELECTOR, "div[role='article']")[:12]:
+    def _find_recent_permalink(self, articles: list[WebElement], text_probe: str) -> str | None:
+        for article in articles:
             try:
-                if text_probe:
-                    article_text = " ".join(article.text.split()).lower()
-                    if text_probe not in article_text:
-                        continue
+                if text_probe and text_probe not in " ".join(article.text.split()).lower():
+                    continue
                 url = self._extract_permalink(article)
                 if url:
                     return url
@@ -355,9 +337,8 @@ class FacebookAdapter(PlatformAdapter):
 
     @staticmethod
     def _extract_permalink(article: WebElement) -> str | None:
-        candidates = article.find_elements(By.CSS_SELECTOR, "a[href]")
         markers = ("/posts/", "/videos/", "/reel/", "story_fbid=", "/permalink/")
-        for link in candidates:
+        for link in article.find_elements(By.CSS_SELECTOR, "a[href]"):
             href = link.get_attribute("href") or ""
             if any(marker in href for marker in markers):
                 return href
@@ -365,9 +346,10 @@ class FacebookAdapter(PlatformAdapter):
 
     def _find_post_button(self, composer: WebElement) -> WebElement | None:
         for text in self._POST_TEXT:
+            literal = self._xpath_literal(text)
             xpath = (
                 ".//*[@role='button' and "
-                f"(normalize-space(@aria-label)={self._xpath_literal(text)} or normalize-space(.)={self._xpath_literal(text)})]"
+                f"(normalize-space(@aria-label)={literal} or normalize-space(.)={literal})]"
             )
             for element in composer.find_elements(By.XPATH, xpath):
                 try:
@@ -401,16 +383,16 @@ class FacebookAdapter(PlatformAdapter):
         return result
 
     @staticmethod
-    def _find_file_input(root: WebElement) -> WebElement | None:
+    def _find_file_input(root: Any) -> WebElement | None:
         for element in root.find_elements(By.CSS_SELECTOR, "input[type='file']"):
             accept = (element.get_attribute("accept") or "").lower()
             if not accept or "image" in accept or "video" in accept:
                 return element
         return None
 
-    def _wait_file_input(self, root: WebElement) -> WebElement:
-        return WebDriverWait(root, self.DEFAULT_TIMEOUT).until(
-            lambda current: self._find_file_input(current) or False
+    def _wait_file_input(self, driver: Chrome, composer: WebElement) -> WebElement:
+        return WebDriverWait(driver, self.DEFAULT_TIMEOUT).until(
+            lambda _: self._find_file_input(composer) or self._find_file_input(driver) or False
         )
 
     def _find_descendant(
@@ -468,7 +450,6 @@ class FacebookAdapter(PlatformAdapter):
     def _safe_click(driver: Chrome, element: WebElement) -> None:
         try:
             element.click()
-            return
         except ElementClickInterceptedException:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
             time.sleep(0.2)
@@ -479,11 +460,7 @@ class FacebookAdapter(PlatformAdapter):
         lowered = (driver.current_url or "").lower()
         return any(
             marker in lowered
-            for marker in (
-                "/checkpoint",
-                "/recover",
-                "/two_step_verification",
-            )
+            for marker in ("/checkpoint", "/recover", "/two_step_verification")
         )
 
     @staticmethod
