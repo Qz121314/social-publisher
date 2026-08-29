@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from app.services.platforms.base import PlatformAdapter, PlatformValidationError
-from app.services.platforms.facebook_unified_flow import UnifiedFacebookFlowAdapter
+from app.services.platforms.facebook_configurable_flow import ConfigurableFacebookFlowAdapter
 
 _ADAPTERS: dict[str, PlatformAdapter] = {
-    "facebook": UnifiedFacebookFlowAdapter(),
+    "facebook": ConfigurableFacebookFlowAdapter(),
 }
 
 
