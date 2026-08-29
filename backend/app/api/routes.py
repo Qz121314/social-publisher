@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.accounts import router as accounts_router
 from app.api.contents import router as contents_router
+from app.api.publish_targets import router as publish_targets_router
 from app.database import get_db
 from app.models.account import BrowserProfile
 from app.schemas.account import BrowserProfileRead
@@ -16,6 +17,7 @@ from app.services.worker import worker_manager, worker_task_to_dict
 router = APIRouter()
 router.include_router(accounts_router)
 router.include_router(contents_router)
+router.include_router(publish_targets_router)
 
 
 @router.get("/status")
