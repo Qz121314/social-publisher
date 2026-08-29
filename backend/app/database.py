@@ -39,6 +39,6 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import account, content, execution  # noqa: F401
+    from app.models import account, content, execution, publish_target  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
