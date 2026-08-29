@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from app.services.platforms.base import PlatformAdapter, PlatformValidationError
-from app.services.platforms.facebook_target import TargetActorFacebookAdapter
+from app.services.platforms.facebook_surface import FacebookSurfaceAdapter
 
 _ADAPTERS: dict[str, PlatformAdapter] = {
-    "facebook": TargetActorFacebookAdapter(),
+    "facebook": FacebookSurfaceAdapter(),
 }
 
 
