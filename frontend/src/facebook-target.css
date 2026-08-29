@@ -1,13 +1,15 @@
 .target-shell {
-  max-width: 1428px;
-  margin: 24px auto 0;
-  padding: 0 24px;
+  width: 100%;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0;
 }
 
 .target-panel {
-  border: 1px solid #d8dee8;
+  border: 1px solid #e2e6ec;
+  border-radius: 9px;
   background: #fff;
-  padding: 26px 30px;
+  padding: 24px;
 }
 
 .target-heading {
@@ -15,180 +17,231 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .target-heading h2 {
-  margin: 6px 0 8px;
-  font-size: 28px;
+  margin: 5px 0 8px;
+  font-size: 26px;
+  letter-spacing: -.03em;
 }
 
 .target-heading p {
   margin: 0;
-  max-width: 980px;
-  color: #647084;
+  max-width: 900px;
+  color: #677182;
+  font-size: 13px;
   line-height: 1.65;
 }
 
 .target-kicker {
-  font-size: 12px;
-  font-weight: 700;
-  color: #69758a;
-  letter-spacing: .08em;
+  font-size: 10px;
+  font-weight: 850;
+  color: #7f8997;
+  letter-spacing: .12em;
 }
 
 .target-refresh,
 .target-actions button {
-  border: 1px solid #cfd6e2;
+  min-height: 36px;
+  border: 1px solid #d4dae3;
+  border-radius: 6px;
   background: #fff;
-  padding: 9px 13px;
+  color: #465160;
+  padding: 0 11px;
   cursor: pointer;
   font: inherit;
+  font-size: 12px;
+  font-weight: 730;
 }
 
 .target-refresh:hover,
 .target-actions button:hover:not(:disabled) {
-  background: #f6f8fb;
+  border-color: #aeb8c6;
+  background: #fafbfc;
+  color: #1f2937;
 }
 
 .target-actions button:disabled {
-  opacity: .55;
+  opacity: .52;
   cursor: not-allowed;
 }
 
 .target-actions .target-primary {
-  border-color: #315d9f;
-  background: #315d9f;
+  border-color: #245fb5;
+  background: #245fb5;
   color: #fff;
 }
 
 .target-actions .target-primary:hover:not(:disabled) {
-  background: #274d86;
+  border-color: #1e529d;
+  background: #1e529d;
+  color: #fff;
 }
 
 .target-actions .target-confirm {
-  border-color: #8aa5cc;
-  background: #f3f7fc;
-  color: #244b7d;
+  border-color: #c7d6e9;
+  background: #f5f8fc;
+  color: #315c8c;
 }
 
 .target-notice {
-  border: 1px solid #cfd8e6;
-  background: #f6f9fd;
-  padding: 12px 14px;
-  margin-bottom: 18px;
-  color: #26354b;
+  border: 1px solid #d7e0ec;
+  border-radius: 6px;
+  background: #f7f9fc;
+  padding: 11px 13px;
+  margin-bottom: 16px;
+  color: #354154;
+  font-size: 12px;
 }
 
 .target-list {
-  border-top: 1px solid #e3e7ee;
+  border: 1px solid #e5e9ef;
+  border-radius: 7px;
+  overflow: hidden;
 }
 
 .target-row {
   display: grid;
-  grid-template-columns: minmax(190px, .9fr) minmax(230px, 1fr) minmax(300px, 1.35fr) minmax(300px, 1.35fr);
-  gap: 20px;
+  grid-template-columns: minmax(170px, .8fr) minmax(220px, 1fr) minmax(280px, 1.25fr) minmax(280px, 1.2fr);
+  gap: 18px;
   align-items: center;
-  padding: 18px 0;
-  border-bottom: 1px solid #e3e7ee;
+  padding: 17px;
+  border-bottom: 1px solid #e9edf2;
+  background: #fff;
+}
+
+.target-row:nth-child(even) {
+  background: #fcfcfd;
+}
+
+.target-row:last-child {
+  border-bottom: 0;
 }
 
 .target-profile {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .target-index {
+  min-width: 36px;
+  color: #8a94a2;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: #778399;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.target-profile > div,
+.target-current,
+.target-discovery {
+  min-width: 0;
 }
 
 .target-profile strong,
 .target-current strong,
 .target-discovery strong {
   display: block;
+  color: #1f2937;
+  font-size: 13px;
 }
 
 .target-profile small,
 .target-current small {
   display: block;
   margin-top: 4px;
-  color: #7a8495;
+  color: #7d8795;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .target-current .target-confirmed {
-  color: #237a4b;
-  font-weight: 700;
+  color: #2f7a4f;
+  font-weight: 750;
 }
 
 .target-current .target-unconfirmed {
-  color: #a15c00;
-  font-weight: 700;
+  color: #9a6a1e;
+  font-weight: 750;
 }
 
 .target-label {
   display: block;
-  margin-bottom: 4px;
-  color: #8993a4;
-  font-size: 12px;
-  font-weight: 700;
+  margin-bottom: 5px;
+  color: #9099a6;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .07em;
+  text-transform: uppercase;
 }
 
 .target-current {
-  border-left: 3px solid #d5dbe5;
-  padding-left: 14px;
+  border-left: 2px solid #d8dee6;
+  padding-left: 12px;
 }
 
 .target-current.configured {
-  border-left-color: #2f855a;
+  border-left-color: #4c8b68;
 }
 
 .target-current a {
   display: inline-block;
   margin-top: 6px;
-  font-size: 13px;
+  color: #315f95;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
-.target-discovery {
-  min-width: 0;
+.target-current a:hover {
+  text-decoration: underline;
 }
 
 .target-discovery-head {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 7px;
 }
 
 .target-discovery-head span {
-  color: #7a8495;
-  font-size: 13px;
+  color: #8a94a2;
+  font-size: 11px;
 }
 
 .target-discovery select {
   width: 100%;
   min-height: 38px;
-  border: 1px solid #cfd6e2;
+  border: 1px solid #d4dae3;
+  border-radius: 6px;
   background: #fff;
-  padding: 7px 9px;
+  color: #283444;
+  padding: 0 9px;
   font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.target-discovery select:focus {
+  border-color: #6d8fb9;
+  box-shadow: 0 0 0 3px rgba(73, 116, 168, .08);
 }
 
 .target-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 .target-actions .target-danger {
-  color: #b42318;
-  border-color: #efc8c5;
+  color: #a83b32;
+  border-color: #e8cbc8;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1220px) {
   .target-row {
     grid-template-columns: 1fr 1fr;
   }
@@ -198,23 +251,23 @@
   }
 }
 
-@media (max-width: 760px) {
-  .target-shell {
-    padding: 0 12px;
-  }
-
+@media (max-width: 720px) {
   .target-panel {
-    padding: 20px 16px;
+    padding: 17px;
   }
 
-  .target-heading,
+  .target-heading {
+    flex-direction: column;
+  }
+
   .target-row {
     display: block;
+    padding: 15px;
   }
 
   .target-current,
   .target-discovery,
   .target-actions {
-    margin-top: 16px;
+    margin-top: 14px;
   }
 }
