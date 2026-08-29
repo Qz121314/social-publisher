@@ -53,12 +53,7 @@ class BrowserSession:
 
 
 class BrowserSessionManager:
-    """Owns Selenium sessions attached to iXBrowser profiles.
-
-    Sessions are intentionally kept in memory. A later worker/lock layer will
-    own persistence and crash recovery; this manager only handles the live
-    browser process lifecycle for the current backend process.
-    """
+    """Owns Selenium sessions attached to iXBrowser profiles."""
 
     def __init__(self) -> None:
         self._sessions: dict[int, BrowserSession] = {}
@@ -114,6 +109,24 @@ class BrowserSessionManager:
             )
             self._sessions[profile_id] = session
             return {**session.snapshot(), "already_open": False}
+
+    def get_driver(self, profile_id: int) -> Chrome:
+        """Return the live Selenium driver for a profile owned by this process."""
+        with self._lock:
+            session = self._sessions.get(profile_id)
+            if session is None:
+                raise BrowserSessionError(
+                    f"Profile #{profile_id} is not attached to this backend process."
+                )
+
+            snapshot = session.snapshot()
+            if not snapshot["alive"]:
+                self._sessions.pop(profile_id, None)
+                self._stop_driver_service(session.driver)
+                raise BrowserSessionError(
+                    f"Selenium session for profile #{profile_id} is no longer alive."
+                )
+            return session.driver
 
     def probe(self, profile_id: int) -> dict[str, Any]:
         with self._lock:
