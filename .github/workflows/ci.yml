@@ -18,6 +18,9 @@ jobs:
         run: python -m pip install -r backend/requirements.txt
       - name: Compile backend
         run: python -m compileall -q backend/app
+      - name: Import FastAPI application
+        working-directory: backend
+        run: python -c "from app.main import app; print(app.version)"
 
   frontend:
     runs-on: ubuntu-latest
