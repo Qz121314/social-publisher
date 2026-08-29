@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models.execution import WorkerTask
+from app.models.execution import WorkerTask, utcnow
 from app.services.browser_sessions import browser_sessions
 from app.services.profile_locks import ProfileBusyError, profile_locks
 
@@ -31,6 +31,31 @@ class WorkerManager:
         )
         self._futures: dict[str, Future[Any]] = {}
         self._lock = RLock()
+
+    def recover_runtime_state(self) -> dict[str, int]:
+        """Recover database state after a local backend restart.
+
+        Social Publisher is intentionally a single local backend process. Any
+        persisted profile lock therefore belongs to a dead previous process and
+        can be safely removed at startup. Queued/running diagnostic tasks are
+        marked interrupted instead of being executed a second time implicitly.
+        """
+        with SessionLocal() as db:
+            cleared_locks = profile_locks.clear_all(db)
+            statement = select(WorkerTask).where(
+                WorkerTask.status.in_(["queued", "running"])
+            )
+            interrupted = list(db.scalars(statement).all())
+            now = utcnow()
+            for task in interrupted:
+                task.status = "interrupted"
+                task.finished_at = now
+                task.error_message = "Backend restarted before this task completed."
+            db.commit()
+            return {
+                "cleared_locks": cleared_locks,
+                "interrupted_tasks": len(interrupted),
+            }
 
     def submit_browser_test(self, profile_id: int) -> WorkerTask:
         with SessionLocal() as db:
@@ -65,8 +90,6 @@ class WorkerManager:
             profile_id = task.profile_id
             task.status = "running"
             task.attempts += 1
-            from app.models.execution import utcnow
-
             task.started_at = utcnow()
             db.commit()
 
@@ -95,22 +118,14 @@ class WorkerManager:
             with SessionLocal() as db:
                 task = db.get(WorkerTask, task_id)
                 if task is not None:
-                    from app.models.execution import utcnow
-
                     task.status = "succeeded"
                     task.result_json = json.dumps(result, ensure_ascii=False)
                     task.finished_at = utcnow()
                     db.commit()
+        except ProfileBusyError as exc:
+            self._mark_task_error(task_id, "blocked", str(exc))
         except Exception as exc:
-            with SessionLocal() as db:
-                task = db.get(WorkerTask, task_id)
-                if task is not None:
-                    from app.models.execution import utcnow
-
-                    task.status = "failed"
-                    task.error_message = str(exc)
-                    task.finished_at = utcnow()
-                    db.commit()
+            self._mark_task_error(task_id, "failed", str(exc))
         finally:
             if opened_here and profile_id is not None:
                 try:
@@ -124,6 +139,16 @@ class WorkerManager:
                         profile_locks.release(db, profile_id, owner_id)
                     except ProfileBusyError:
                         pass
+
+    def _mark_task_error(self, task_id: str, task_status: str, message: str) -> None:
+        with SessionLocal() as db:
+            task = db.get(WorkerTask, task_id)
+            if task is None:
+                return
+            task.status = task_status
+            task.error_message = message
+            task.finished_at = utcnow()
+            db.commit()
 
     def get_task(self, db: Session, task_id: str) -> WorkerTask | None:
         return db.get(WorkerTask, task_id)
