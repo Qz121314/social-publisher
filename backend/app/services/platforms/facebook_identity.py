@@ -16,11 +16,12 @@ from app.services.platforms.facebook_adaptive import AdaptiveFacebookAdapter
 class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
     """Facebook adapter that switches the active publishing identity first.
 
-    Navigating to a personal profile or Page URL does not necessarily change
-    Facebook's active actor. New Pages Experience keeps the current actor in the
-    session. We therefore verify `c_user` / `i_user`, use Facebook's visible
-    account/profile switcher when needed, verify the actor changed, and only then
-    navigate to the configured publish target.
+    Navigating to a profile/Page URL does not necessarily change Facebook's
+    active publishing actor. The switcher is also two-level on many accounts:
+    the first account menu contains a direct "Switch to <personal profile>"
+    action plus a "See all profiles/Pages" action, while managed Pages live in
+    the second-level list. We follow that UI explicitly, verify c_user/i_user,
+    and only then navigate to the configured publish target.
     """
 
     _ACCOUNT_MENU_LABELS = (
@@ -36,15 +37,26 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
     )
     _SEE_ALL_PROFILES_TEXT = (
         "See all profiles",
+        "See all Pages",
+        "See all profiles and Pages",
         "Switch profile",
         "Switch profiles",
         "All profiles",
+        "查看所有主页",
+        "查看全部主页",
         "查看所有个人主页",
         "查看所有个人资料",
         "查看全部个人主页",
+        "查看所有个人主页和公共主页",
         "切换个人主页",
         "切换个人资料",
         "所有个人主页",
+    )
+    _SWITCH_TO_PERSONAL_PREFIXES = (
+        "Switch to ",
+        "Switch into ",
+        "切换到",
+        "切换至",
     )
 
     def _navigate_to_target(self, driver: Chrome, content: PlatformContent) -> None:
@@ -59,13 +71,19 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         c_user = self._cookie_value(driver, "c_user")
         current_actor = self._current_actor_id(driver)
 
-        # The personal profile discovered by the scanner is the c_user account.
-        # A Page actor is normally represented by i_user.
-        if content.target_type == "profile" and c_user and expected_actor != c_user:
-            raise PlatformPublishError(
-                "Facebook 个人主页目标与当前登录账号不一致，已停止发布。"
-                f" 登录账号={c_user}，目标={expected_actor}。"
-            )
+        # A personal-profile target must always be the actual logged-in account.
+        # Do not trust the display name here: Facebook titles/names can vary by
+        # experiment and notification state, while c_user is the stable account id.
+        if content.target_type == "profile":
+            if not c_user:
+                raise PlatformPublishError(
+                    "无法读取 Facebook 登录账号 ID（c_user），不能安全切换到个人主页。"
+                )
+            if expected_actor != c_user:
+                raise PlatformPublishError(
+                    "Facebook 个人主页目标与当前登录账号不一致，已停止发布。"
+                    f" 登录账号={c_user}，目标={expected_actor}。"
+                )
 
         if current_actor == expected_actor:
             return
@@ -86,15 +104,29 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         self._safe_click(driver, opener)
         time.sleep(0.8)
 
-        # Some layouts show all identities immediately; others require one more
-        # click on See all profiles / Switch profile.
-        target_control = self._find_identity_control(driver, content)
-        if target_control is None:
-            expand = self._find_switcher_expand_control(driver)
-            if expand is not None:
-                self._safe_click(driver, expand)
-                time.sleep(0.8)
-                target_control = self._find_identity_control(driver, content)
+        if content.target_type == "profile":
+            # On the first-level menu Facebook commonly renders exactly one
+            # direct action such as "切换到 Tanin Nan". That action is the correct
+            # way to leave a Page actor and return to c_user. Do not try to match
+            # the personal target by its stored display name.
+            target_control = self._find_personal_switch_control(driver)
+            if target_control is None:
+                expand = self._find_switcher_expand_control(driver)
+                if expand is not None:
+                    self._safe_click(driver, expand)
+                    time.sleep(0.8)
+                    target_control = self._find_identity_control(driver, content)
+        else:
+            # Managed Pages may be visible on the first menu, but usually live
+            # behind "查看所有主页 / See all profiles". Try direct match first,
+            # then expand to the complete identity list.
+            target_control = self._find_identity_control(driver, content)
+            if target_control is None:
+                expand = self._find_switcher_expand_control(driver)
+                if expand is not None:
+                    self._safe_click(driver, expand)
+                    time.sleep(0.8)
+                    target_control = self._find_identity_control(driver, content)
 
         if target_control is None:
             raise PlatformPublishError(
@@ -104,7 +136,9 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
             )
 
         self._safe_click(driver, target_control)
+        self._wait_for_actor(driver, expected_actor)
 
+    def _wait_for_actor(self, driver: Chrome, expected_actor: str) -> None:
         end = time.monotonic() + 25
         last_actor: str | None = None
         while time.monotonic() < end:
@@ -169,9 +203,6 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         if not candidates:
             return None
 
-        # Facebook's account/avatar control is normally the right-most matching
-        # control in the top navigation. Prefer it over profile-related buttons in
-        # the page body.
         def x_position(element: WebElement) -> float:
             try:
                 return float(element.rect.get("x") or 0)
@@ -179,6 +210,48 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
                 return 0
 
         return max(candidates, key=x_position)
+
+    def _find_personal_switch_control(self, driver: Chrome) -> WebElement | None:
+        """Find the direct first-level action that returns Page actor -> c_user."""
+        width = self._viewport_width(driver)
+        prefixes = tuple(value.casefold() for value in self._SWITCH_TO_PERSONAL_PREFIXES)
+        try:
+            elements = driver.find_elements(
+                By.CSS_SELECTOR,
+                "[role='menuitem'], [role='button'], a, [tabindex='0']",
+            )
+        except WebDriverException:
+            return None
+
+        matches: list[WebElement] = []
+        for element in elements:
+            try:
+                if not element.is_displayed() or element.rect.get("x", 0) < width * 0.45:
+                    continue
+                value = " ".join(
+                    filter(
+                        None,
+                        [
+                            element.get_attribute("aria-label") or "",
+                            element.text or "",
+                        ],
+                    )
+                ).strip()
+                folded = value.casefold()
+                if not value:
+                    continue
+                if any(folded.startswith(prefix) for prefix in prefixes):
+                    # Exclude generic "Switch profile(s)" controls; we want the
+                    # concrete action that includes the target person's name.
+                    if folded in {"switch profile", "switch profiles", "切换个人主页", "切换个人资料"}:
+                        continue
+                    matches.append(element)
+            except StaleElementReferenceException:
+                continue
+
+        if not matches:
+            return None
+        return max(matches, key=lambda item: float(item.rect.get("x") or 0))
 
     def _find_switcher_expand_control(self, driver: Chrome) -> WebElement | None:
         for text in self._SEE_ALL_PROFILES_TEXT:
@@ -195,15 +268,14 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         name = " ".join((content.target_name or "").split()).strip()
         expected_actor = (content.target_id or "").strip()
 
-        # Prefer the visible identity name in the opened account switcher.
-        if name and name.casefold() not in {"个人主页", "profile"}:
+        # Page names are useful after entering Facebook's complete identity list.
+        # Personal-profile switching intentionally does not rely on name matching.
+        if content.target_type != "profile" and name:
             control = self._find_clickable_by_text(driver, name, right_half_only=True)
             if control is not None:
                 return control
 
-        # Fallback for switcher controls that expose the target id in href/data.
-        # Restrict this to the right half of the viewport where Facebook renders
-        # the account switcher so normal profile links in the feed are ignored.
+        # Prefer a control that exposes the stable actor ID in href/data attrs.
         if expected_actor:
             try:
                 elements = driver.find_elements(
@@ -295,7 +367,7 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
                 ).strip()
                 if value and value not in labels:
                     labels.append(value[:100])
-                if len(labels) >= 10:
+                if len(labels) >= 12:
                     break
             except StaleElementReferenceException:
                 continue
