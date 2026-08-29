@@ -38,6 +38,19 @@ class PublishTargetCandidateRead(BaseModel):
     last_seen_at: datetime
 
 
+class PublishTargetConfirmationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    platform: str
+    target_id: str
+    actor_id: str
+    entry_signature_json: str
+    confirmed_at: datetime
+    updated_at: datetime
+
+
 class FacebookPageScanRead(BaseModel):
     profile_id: int
     count: int
