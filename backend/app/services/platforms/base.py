@@ -54,6 +54,10 @@ class PlatformMedia:
 class PlatformContent:
     text: str
     media: tuple[PlatformMedia, ...]
+    target_type: str | None = None
+    target_id: str | None = None
+    target_name: str | None = None
+    target_url: str | None = None
 
 
 class PlatformAdapter(ABC):
