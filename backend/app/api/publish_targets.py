@@ -26,6 +26,8 @@ router = APIRouter(tags=["publish-targets"])
 
 _FACEBOOK_RESERVED_PATHS = {
     "",
+    "ad_center",
+    "ads",
     "home.php",
     "login",
     "login.php",
@@ -40,6 +42,7 @@ _FACEBOOK_RESERVED_PATHS = {
     "friends",
     "gaming",
     "events",
+    "latest",
 }
 
 
@@ -60,9 +63,11 @@ def list_facebook_page_candidates(
     include_unavailable: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> list[PublishTargetCandidate]:
+    # Kept for frontend/backward compatibility. Candidates now contain only
+    # actual publish identities: personal profile or managed Page.
     statement = select(PublishTargetCandidate).where(
         PublishTargetCandidate.platform == "facebook",
-        PublishTargetCandidate.target_type == "page",
+        PublishTargetCandidate.target_type.in_(["profile", "page"]),
     )
     if profile_id is not None:
         statement = statement.where(PublishTargetCandidate.profile_id == profile_id)
@@ -70,6 +75,7 @@ def list_facebook_page_candidates(
         statement = statement.where(PublishTargetCandidate.is_available.is_(True))
     statement = statement.order_by(
         PublishTargetCandidate.profile_id,
+        PublishTargetCandidate.target_type,
         PublishTargetCandidate.target_name,
     )
     return list(db.scalars(statement).all())
@@ -87,7 +93,7 @@ def scan_facebook_pages(
     if profile is None:
         raise HTTPException(status_code=404, detail="未找到该 iX 环境，请先同步 iX 环境。")
 
-    owner_id = f"facebook-page-scan:{uuid4().hex[:12]}"
+    owner_id = f"facebook-target-scan:{uuid4().hex[:12]}"
     opened_here = False
     lock_acquired = False
     try:
@@ -110,7 +116,6 @@ def scan_facebook_pages(
                 select(PublishTargetCandidate).where(
                     PublishTargetCandidate.profile_id == profile_id,
                     PublishTargetCandidate.platform == "facebook",
-                    PublishTargetCandidate.target_type == "page",
                 )
             ).all()
         )
@@ -118,25 +123,26 @@ def scan_facebook_pages(
         for item in existing:
             item.is_available = False
 
-        for page in discovered:
-            candidate = existing_by_id.get(page["target_id"])
+        for discovered_target in discovered:
+            candidate = existing_by_id.get(discovered_target["target_id"])
             if candidate is None:
                 candidate = PublishTargetCandidate(
                     profile_id=profile_id,
                     platform="facebook",
-                    target_type="page",
-                    target_id=page["target_id"],
-                    target_name=page["target_name"],
-                    target_url=page["target_url"],
-                    source=page["source"],
+                    target_type=discovered_target["target_type"],
+                    target_id=discovered_target["target_id"],
+                    target_name=discovered_target["target_name"],
+                    target_url=discovered_target["target_url"],
+                    source=discovered_target["source"],
                     is_available=True,
                     last_seen_at=now,
                 )
                 db.add(candidate)
             else:
-                candidate.target_name = page["target_name"]
-                candidate.target_url = page["target_url"]
-                candidate.source = page["source"]
+                candidate.target_type = discovered_target["target_type"]
+                candidate.target_name = discovered_target["target_name"]
+                candidate.target_url = discovered_target["target_url"]
+                candidate.source = discovered_target["source"]
                 candidate.is_available = True
                 candidate.last_seen_at = now
 
@@ -147,10 +153,10 @@ def scan_facebook_pages(
                 .where(
                     PublishTargetCandidate.profile_id == profile_id,
                     PublishTargetCandidate.platform == "facebook",
-                    PublishTargetCandidate.target_type == "page",
+                    PublishTargetCandidate.target_type.in_(["profile", "page"]),
                     PublishTargetCandidate.is_available.is_(True),
                 )
-                .order_by(PublishTargetCandidate.target_name)
+                .order_by(PublishTargetCandidate.target_type, PublishTargetCandidate.target_name)
             ).all()
         )
         return {"profile_id": profile_id, "count": len(items), "items": items}
@@ -191,11 +197,11 @@ def select_facebook_page_target(
         candidate is None
         or candidate.profile_id != profile_id
         or candidate.platform != "facebook"
-        or candidate.target_type != "page"
+        or candidate.target_type not in {"profile", "page"}
     ):
-        raise HTTPException(status_code=404, detail="没有找到这个 Facebook 公共主页候选项。")
+        raise HTTPException(status_code=404, detail="没有找到这个 Facebook 发布主页候选项。")
     if not candidate.is_available:
-        raise HTTPException(status_code=409, detail="这个公共主页已不在最近一次扫描结果中，请重新扫描。")
+        raise HTTPException(status_code=409, detail="这个发布主页已不在最近一次扫描结果中，请重新扫描。")
 
     target = db.scalar(
         select(PublishTarget).where(
@@ -207,14 +213,14 @@ def select_facebook_page_target(
         target = PublishTarget(
             profile_id=profile_id,
             platform="facebook",
-            target_type="page",
+            target_type=candidate.target_type,
             target_id=candidate.target_id,
             target_name=candidate.target_name,
             target_url=candidate.target_url,
         )
         db.add(target)
     else:
-        target.target_type = "page"
+        target.target_type = candidate.target_type
         target.target_id = candidate.target_id
         target.target_name = candidate.target_name
         target.target_url = candidate.target_url
