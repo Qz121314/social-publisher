@@ -10,6 +10,7 @@ from app.services.worker import worker_manager
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    worker_manager.recover_runtime_state()
     yield
     worker_manager.shutdown(wait=False)
 
