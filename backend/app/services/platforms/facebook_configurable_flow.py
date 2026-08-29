@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
+from selenium.webdriver import Chrome
+from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webelement import WebElement
+
 from app.services.platforms.facebook_flow_config import load_facebook_flow
 from app.services.platforms.facebook_unified_flow import UnifiedFacebookFlowAdapter
 
@@ -48,3 +53,33 @@ class ConfigurableFacebookFlowAdapter(UnifiedFacebookFlowAdapter):
     @property
     def _SUCCESS_TEXT(self) -> tuple[str, ...]:  # noqa: N802
         return self._keywords("success_keywords")
+
+    def _media_is_busy(self, driver: Chrome, composer: WebElement) -> bool:
+        """Detect media-processing state without treating WebDriver as a WebElement.
+
+        Selenium WebDriver supports ``find_elements`` but does not expose the
+        WebElement ``text`` property. For the document-wide fallback we therefore
+        read the visible text from ``body`` explicitly.
+        """
+
+        for root in (composer, driver):
+            try:
+                if any(
+                    item.is_displayed()
+                    for item in root.find_elements(By.CSS_SELECTOR, "[role='progressbar']")
+                ):
+                    return True
+
+                if isinstance(root, WebElement):
+                    visible_text = root.text or ""
+                else:
+                    body = driver.find_element(By.TAG_NAME, "body")
+                    visible_text = body.text or ""
+
+                lowered = visible_text.casefold()
+                if any(marker.casefold() in lowered for marker in self._UPLOAD_BUSY_TEXT):
+                    return True
+            except (StaleElementReferenceException, WebDriverException):
+                continue
+
+        return False
