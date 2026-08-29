@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
@@ -8,9 +10,16 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.account import BrowserProfile
-from app.models.publish_target import PublishTarget
-from app.schemas.publish_target import PublishTargetCaptureRequest, PublishTargetRead
+from app.models.publish_target import PublishTarget, PublishTargetCandidate
+from app.schemas.publish_target import (
+    FacebookPageScanRead,
+    PublishTargetCandidateRead,
+    PublishTargetCaptureRequest,
+    PublishTargetRead,
+)
 from app.services.browser_sessions import BrowserSessionError, browser_sessions
+from app.services.facebook_pages import FacebookPageDiscoveryError, discover_managed_facebook_pages
+from app.services.ixbrowser import IXBrowserError
 from app.services.profile_locks import ProfileBusyError, profile_locks
 
 router = APIRouter(tags=["publish-targets"])
@@ -43,6 +52,176 @@ def list_publish_targets(
     if platform:
         statement = statement.where(PublishTarget.platform == platform.strip().lower())
     return list(db.scalars(statement).all())
+
+
+@router.get("/facebook-page-candidates", response_model=list[PublishTargetCandidateRead])
+def list_facebook_page_candidates(
+    profile_id: int | None = Query(default=None),
+    include_unavailable: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> list[PublishTargetCandidate]:
+    statement = select(PublishTargetCandidate).where(
+        PublishTargetCandidate.platform == "facebook",
+        PublishTargetCandidate.target_type == "page",
+    )
+    if profile_id is not None:
+        statement = statement.where(PublishTargetCandidate.profile_id == profile_id)
+    if not include_unavailable:
+        statement = statement.where(PublishTargetCandidate.is_available.is_(True))
+    statement = statement.order_by(
+        PublishTargetCandidate.profile_id,
+        PublishTargetCandidate.target_name,
+    )
+    return list(db.scalars(statement).all())
+
+
+@router.post(
+    "/browser-profiles/{profile_id}/facebook-pages/scan",
+    response_model=FacebookPageScanRead,
+)
+def scan_facebook_pages(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    profile = db.get(BrowserProfile, profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="未找到该 iX 环境，请先同步 iX 环境。")
+
+    owner_id = f"facebook-page-scan:{uuid4().hex[:12]}"
+    opened_here = False
+    lock_acquired = False
+    try:
+        profile_locks.acquire(
+            db,
+            profile_id=profile_id,
+            owner_id=owner_id,
+            ttl_seconds=180,
+        )
+        lock_acquired = True
+
+        session = browser_sessions.open(profile_id)
+        opened_here = not bool(session.get("already_open"))
+        driver = browser_sessions.get_driver(profile_id)
+        discovered = discover_managed_facebook_pages(driver)
+
+        now = datetime.now(timezone.utc)
+        existing = list(
+            db.scalars(
+                select(PublishTargetCandidate).where(
+                    PublishTargetCandidate.profile_id == profile_id,
+                    PublishTargetCandidate.platform == "facebook",
+                    PublishTargetCandidate.target_type == "page",
+                )
+            ).all()
+        )
+        existing_by_id = {item.target_id: item for item in existing}
+        for item in existing:
+            item.is_available = False
+
+        for page in discovered:
+            candidate = existing_by_id.get(page["target_id"])
+            if candidate is None:
+                candidate = PublishTargetCandidate(
+                    profile_id=profile_id,
+                    platform="facebook",
+                    target_type="page",
+                    target_id=page["target_id"],
+                    target_name=page["target_name"],
+                    target_url=page["target_url"],
+                    source=page["source"],
+                    is_available=True,
+                    last_seen_at=now,
+                )
+                db.add(candidate)
+            else:
+                candidate.target_name = page["target_name"]
+                candidate.target_url = page["target_url"]
+                candidate.source = page["source"]
+                candidate.is_available = True
+                candidate.last_seen_at = now
+
+        db.commit()
+        items = list(
+            db.scalars(
+                select(PublishTargetCandidate)
+                .where(
+                    PublishTargetCandidate.profile_id == profile_id,
+                    PublishTargetCandidate.platform == "facebook",
+                    PublishTargetCandidate.target_type == "page",
+                    PublishTargetCandidate.is_available.is_(True),
+                )
+                .order_by(PublishTargetCandidate.target_name)
+            ).all()
+        )
+        return {"profile_id": profile_id, "count": len(items), "items": items}
+    except ProfileBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FacebookPageDiscoveryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (IXBrowserError, BrowserSessionError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        if opened_here:
+            try:
+                browser_sessions.close(profile_id)
+            except Exception:
+                pass
+        if lock_acquired:
+            try:
+                profile_locks.release(db, profile_id, owner_id)
+            except ProfileBusyError:
+                pass
+
+
+@router.post(
+    "/browser-profiles/{profile_id}/facebook-target/select/{candidate_id}",
+    response_model=PublishTargetRead,
+)
+def select_facebook_page_target(
+    profile_id: int,
+    candidate_id: int,
+    db: Session = Depends(get_db),
+) -> PublishTarget:
+    profile = db.get(BrowserProfile, profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="未找到该 iX 环境，请先同步 iX 环境。")
+
+    candidate = db.get(PublishTargetCandidate, candidate_id)
+    if (
+        candidate is None
+        or candidate.profile_id != profile_id
+        or candidate.platform != "facebook"
+        or candidate.target_type != "page"
+    ):
+        raise HTTPException(status_code=404, detail="没有找到这个 Facebook 公共主页候选项。")
+    if not candidate.is_available:
+        raise HTTPException(status_code=409, detail="这个公共主页已不在最近一次扫描结果中，请重新扫描。")
+
+    target = db.scalar(
+        select(PublishTarget).where(
+            PublishTarget.profile_id == profile_id,
+            PublishTarget.platform == "facebook",
+        )
+    )
+    if target is None:
+        target = PublishTarget(
+            profile_id=profile_id,
+            platform="facebook",
+            target_type="page",
+            target_id=candidate.target_id,
+            target_name=candidate.target_name,
+            target_url=candidate.target_url,
+        )
+        db.add(target)
+    else:
+        target.target_type = "page"
+        target.target_id = candidate.target_id
+        target.target_name = candidate.target_name
+        target.target_url = candidate.target_url
+
+    db.commit()
+    db.refresh(target)
+    return target
 
 
 @router.post(
@@ -142,8 +321,6 @@ def _normalize_facebook_target(raw_url: str) -> tuple[str, str]:
     if first in _FACEBOOK_RESERVED_PATHS:
         raise ValueError("当前页面不是个人主页或公共主页，请进入具体主页后再保存。")
 
-    # Facebook page/profile slugs are stable enough for navigation. Drop post,
-    # photo and tracking suffixes so publishing always starts from the target root.
     target_id = path.split("/", 1)[0]
     normalized = urlunparse(("https", "www.facebook.com", f"/{target_id}", "", "", ""))
     return normalized, target_id
