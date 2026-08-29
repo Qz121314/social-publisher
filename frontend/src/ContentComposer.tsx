@@ -48,6 +48,43 @@ type Props = {
   onMessage: (message: string | null) => void
 }
 
+const platformLabels: Record<string, string> = {
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  x: 'X',
+  tiktok: 'TikTok',
+  threads: 'Threads',
+  linkedin: 'LinkedIn',
+  youtube: 'YouTube',
+  pinterest: 'Pinterest',
+  other: '其他',
+}
+
+const statusLabels: Record<string, string> = {
+  draft: '草稿',
+  queued: '排队中',
+  running: '执行中',
+  succeeded: '成功',
+  failed: '失败',
+  blocked: '已阻止',
+  interrupted: '已中断',
+  needs_review: '待人工确认',
+}
+
+function platformLabel(value: string) {
+  return platformLabels[value] ?? value
+}
+
+function statusLabel(value: string) {
+  return statusLabels[value] ?? value
+}
+
+function mediaTypeLabel(value: string) {
+  if (value === 'image') return '图片'
+  if (value === 'video') return '视频'
+  return value
+}
+
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
@@ -86,7 +123,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
 
   const loadPlatforms = async () => {
     const response = await fetch('/api/platforms')
-    if (!response.ok) throw new Error(`Unable to load platform capabilities (${response.status}).`)
+    if (!response.ok) throw new Error(`加载平台能力失败（HTTP ${response.status}）。`)
     const data = await response.json() as { items: PlatformCapability[] }
     setPlatforms(data.items)
     if (data.items.length > 0 && !data.items.some((item) => item.name === platform)) {
@@ -96,7 +133,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
 
   const loadContents = async () => {
     const response = await fetch('/api/contents?limit=20')
-    if (!response.ok) throw new Error(`Unable to load content drafts (${response.status}).`)
+    if (!response.ok) throw new Error(`加载内容草稿失败（HTTP ${response.status}）。`)
     setContents(await response.json() as ContentItem[])
   }
 
@@ -120,11 +157,11 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (selectedProfiles.length === 0) {
-      onMessage('Select at least one iX profile.')
+      onMessage('请至少选择一个 iX 环境。')
       return
     }
     if (!text.trim() && files.length === 0) {
-      onMessage('Add post text, image/video media, or both.')
+      onMessage('请填写帖子文案、添加图片/视频，或同时添加两者。')
       return
     }
 
@@ -139,12 +176,12 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
     try {
       const response = await fetch('/api/contents', { method: 'POST', body: form })
       if (!response.ok) {
-        let detail = `HTTP ${response.status}`
+        let detail = `请求失败（HTTP ${response.status}）`
         try {
           const data = await response.json()
           detail = data.detail ?? detail
         } catch {
-          // Keep the HTTP fallback.
+          // 保留 HTTP 状态作为兜底错误信息。
         }
         throw new Error(detail)
       }
@@ -155,7 +192,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
       setSelectedProfiles([])
       await loadContents()
       onMessage(
-        `Draft ${shortId(created.id)} created for ${created.jobs.length} iX profile(s) with ${created.media.length} media file(s).`,
+        `草稿 ${shortId(created.id)} 已创建：${created.jobs.length} 个 iX 环境，${created.media.length} 个媒体文件。`,
       )
     } catch (error) {
       onMessage(error instanceof Error ? error.message : String(error))
@@ -170,18 +207,18 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
     try {
       const response = await fetch(`/api/contents/${content.id}/run`, { method: 'POST' })
       if (!response.ok) {
-        let detail = `HTTP ${response.status}`
+        let detail = `请求失败（HTTP ${response.status}）`
         try {
           const data = await response.json()
           detail = data.detail ?? detail
         } catch {
-          // Keep fallback.
+          // 保留 HTTP 状态作为兜底错误信息。
         }
         throw new Error(detail)
       }
       const result = await response.json() as { queued_count: number }
       await loadContents()
-      onMessage(`Queued ${result.queued_count} Facebook publish job(s) for draft ${shortId(content.id)}.`)
+      onMessage(`草稿 ${shortId(content.id)} 已加入 ${result.queued_count} 个发布任务。`)
     } catch (error) {
       onMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -190,21 +227,21 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
   }
 
   const removeContent = async (content: ContentItem) => {
-    if (!window.confirm(`Delete draft ${shortId(content.id)} and its local media files?`)) return
+    if (!window.confirm(`确定删除草稿 ${shortId(content.id)} 及其本地媒体文件吗？`)) return
     try {
       const response = await fetch(`/api/contents/${content.id}`, { method: 'DELETE' })
       if (!response.ok) {
-        let detail = `Delete failed (${response.status}).`
+        let detail = `删除失败（HTTP ${response.status}）。`
         try {
           const data = await response.json()
           detail = data.detail ?? detail
         } catch {
-          // Keep fallback.
+          // 保留 HTTP 状态作为兜底错误信息。
         }
         throw new Error(detail)
       }
       await loadContents()
-      onMessage(`Draft ${shortId(content.id)} deleted.`)
+      onMessage(`草稿 ${shortId(content.id)} 已删除。`)
     } catch (error) {
       onMessage(error instanceof Error ? error.message : String(error))
     }
@@ -215,36 +252,36 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
       <section className="panel composer-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">CONTENT CENTER</p>
-            <h2>Create publish draft</h2>
+            <p className="eyebrow">内容中心</p>
+            <h2>创建发布草稿</h2>
           </div>
-          <span className="section-meta">Image + video media supported</span>
+          <span className="section-meta">支持图片和视频</span>
         </div>
 
         <form className="composer" onSubmit={submit}>
           <div className="composer-main">
             <label className="field-block">
-              <span>Platform</span>
+              <span>发布平台</span>
               <select value={platform} onChange={(event) => setPlatform(event.target.value)}>
                 {platforms.length === 0 && <option value="facebook">Facebook</option>}
                 {platforms.map((item) => (
-                  <option key={item.name} value={item.name}>{item.display_name}</option>
+                  <option key={item.name} value={item.name}>{platformLabel(item.name)}</option>
                 ))}
               </select>
             </label>
 
             <label className="field-block">
-              <span>Post text</span>
+              <span>帖子文案</span>
               <textarea
                 value={text}
                 onChange={(event) => setText(event.target.value)}
-                placeholder="Write the post content…"
+                placeholder="输入要发布的内容…"
                 rows={7}
               />
             </label>
 
             <label className="media-picker">
-              <span>Add images / videos</span>
+              <span>添加图片 / 视频</span>
               <input
                 type="file"
                 accept="image/*,video/*"
@@ -258,7 +295,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                 {files.map((file, index) => (
                   <div className="selected-media-item" key={`${file.name}-${file.lastModified}-${index}`}>
                     <span className={`media-kind ${file.type.startsWith('video/') ? 'video' : 'image'}`}>
-                      {file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE'}
+                      {file.type.startsWith('video/') ? '视频' : '图片'}
                     </span>
                     <div>
                       <strong>{file.name}</strong>
@@ -269,7 +306,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                       className="text-button danger"
                       onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     >
-                      Remove
+                      移除
                     </button>
                   </div>
                 ))}
@@ -280,8 +317,8 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
           <aside className="profile-selector">
             <div className="profile-selector-head">
               <div>
-                <span>Target iX profiles</span>
-                <strong>{selectedProfiles.length} selected</strong>
+                <span>目标 iX 环境</span>
+                <strong>已选择 {selectedProfiles.length} 个</strong>
               </div>
               <div className="selector-actions">
                 <button
@@ -289,17 +326,17 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                   className="text-button"
                   onClick={() => setSelectedProfiles(availableProfiles.map((item) => item.profile_id))}
                 >
-                  Select all
+                  全选
                 </button>
                 <button type="button" className="text-button" onClick={() => setSelectedProfiles([])}>
-                  Clear
+                  清空
                 </button>
               </div>
             </div>
 
             <div className="profile-options">
               {availableProfiles.length === 0 ? (
-                <div className="profile-selector-empty">Sync iX profiles first.</div>
+                <div className="profile-selector-empty">请先同步 iX 环境。</div>
               ) : availableProfiles.map((profile, index) => (
                 <label className={`profile-option ${selectedSet.has(profile.profile_id) ? 'selected' : ''}`} key={profile.profile_id}>
                   <input
@@ -317,7 +354,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
             </div>
 
             <button className="primary create-draft-button" disabled={submitting} type="submit">
-              {submitting ? 'Saving media…' : 'Create draft'}
+              {submitting ? '正在保存媒体…' : '创建草稿'}
             </button>
           </aside>
         </form>
@@ -326,28 +363,28 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">PUBLISH QUEUE</p>
-            <h2>Recent content</h2>
+            <p className="eyebrow">发布队列</p>
+            <h2>最近内容</h2>
           </div>
-          <span className="section-meta">{contents.length} recent item(s)</span>
+          <span className="section-meta">最近 {contents.length} 条</span>
         </div>
 
         {contents.length === 0 ? (
           <div className="empty-state compact-empty">
-            <strong>No content drafts yet</strong>
-            <span>Create one above using text, images, videos, or a combination.</span>
+            <strong>暂无内容草稿</strong>
+            <span>可以在上方使用文字、图片、视频或组合方式创建草稿。</span>
           </div>
         ) : (
           <div className="table-wrap">
             <table className="content-table">
               <thead>
                 <tr>
-                  <th>Draft</th>
-                  <th>Platform</th>
-                  <th>Content</th>
-                  <th>Media</th>
-                  <th>Target jobs</th>
-                  <th>Status</th>
+                  <th>草稿</th>
+                  <th>平台</th>
+                  <th>内容</th>
+                  <th>媒体</th>
+                  <th>目标任务</th>
+                  <th>状态</th>
                   <th></th>
                 </tr>
               </thead>
@@ -355,12 +392,12 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                 {contents.map((content) => (
                   <tr key={content.id}>
                     <td><strong>{shortId(content.id)}</strong></td>
-                    <td><span className="platform-pill">{content.platform}</span></td>
-                    <td className="content-copy" title={content.text}>{content.text || 'Media-only post'}</td>
+                    <td><span className="platform-pill">{platformLabel(content.platform)}</span></td>
+                    <td className="content-copy" title={content.text}>{content.text || '仅媒体帖子'}</td>
                     <td>
                       <div className="media-summary">
                         {content.media.length === 0 ? (
-                          <span>None</span>
+                          <span>无</span>
                         ) : content.media.map((asset) => (
                           <a
                             key={asset.id}
@@ -369,7 +406,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                             rel="noreferrer"
                             title={`${asset.original_name} · ${formatBytes(asset.file_size)}`}
                           >
-                            {asset.media_type}
+                            {mediaTypeLabel(asset.media_type)}
                           </a>
                         ))}
                       </div>
@@ -384,31 +421,31 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                             <div className="job-target" key={job.id} title={job.error_message || label}>
                               <span>{sequence}</span>
                               <strong>{label}</strong>
-                              <em className={`task-status task-${job.status}`}>{job.status}</em>
+                              <em className={`task-status task-${job.status}`}>{statusLabel(job.status)}</em>
                               {job.published_url && (
-                                <a href={job.published_url} target="_blank" rel="noreferrer">Open post</a>
+                                <a href={job.published_url} target="_blank" rel="noreferrer">查看帖子</a>
                               )}
                             </div>
                           )
                         })}
                       </div>
                     </td>
-                    <td><span className={`task-status task-${content.status}`}>{content.status}</span></td>
+                    <td><span className={`task-status task-${content.status}`}>{statusLabel(content.status)}</span></td>
                     <td className="actions content-actions">
                       <button
                         className="compact-button worker-button"
                         onClick={() => publishNow(content)}
                         disabled={publishingId === content.id || !isRunnable(content)}
-                        title={isRunnable(content) ? 'Queue all draft/failed targets now' : 'No runnable target jobs'}
+                        title={isRunnable(content) ? '立即将所有草稿/失败目标加入发布队列' : '当前没有可执行的目标任务'}
                       >
-                        {publishingId === content.id ? 'Queueing…' : 'Publish now'}
+                        {publishingId === content.id ? '加入队列…' : '立即发布'}
                       </button>
                       <button
                         className="text-button danger"
                         onClick={() => removeContent(content)}
                         disabled={content.jobs.some((job) => job.status === 'queued' || job.status === 'running')}
                       >
-                        Delete
+                        删除
                       </button>
                     </td>
                   </tr>
