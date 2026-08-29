@@ -29,10 +29,32 @@ type TargetCandidate = {
   is_available: boolean
 }
 
+type TargetConfirmation = {
+  id: number
+  profile_id: number
+  platform: string
+  target_id: string
+  actor_id: string
+  entry_signature_json: string
+  confirmed_at: string
+  updated_at: string
+}
+
 type ScanResult = {
   profile_id: number
   count: number
   items: TargetCandidate[]
+}
+
+type ConfirmResult = {
+  profile_id: number
+  target_id: string
+  target_name: string
+  confirmed: boolean
+  actor_id: string
+  editor_confirmed: boolean
+  post_button_confirmed: boolean
+  confirmed_at: string
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -53,10 +75,15 @@ function targetTypeLabel(value: string) {
   return value === 'profile' ? '个人主页' : '公共主页'
 }
 
+function confirmationKey(profileId: number, targetId: string) {
+  return `${profileId}:${targetId}`
+}
+
 export default function FacebookTargetPanel() {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [targets, setTargets] = useState<PublishTarget[]>([])
   const [candidates, setCandidates] = useState<TargetCandidate[]>([])
+  const [confirmations, setConfirmations] = useState<TargetConfirmation[]>([])
   const [selectedCandidate, setSelectedCandidate] = useState<Record<number, number>>({})
   const [message, setMessage] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -64,6 +91,13 @@ export default function FacebookTargetPanel() {
   const targetByProfile = useMemo(
     () => new Map(targets.map((target) => [target.profile_id, target])),
     [targets],
+  )
+
+  const confirmationByTarget = useMemo(
+    () => new Map(
+      confirmations.map((item) => [confirmationKey(item.profile_id, item.target_id), item]),
+    ),
+    [confirmations],
   )
 
   const candidatesByProfile = useMemo(() => {
@@ -77,17 +111,20 @@ export default function FacebookTargetPanel() {
   }, [candidates])
 
   const load = async () => {
-    const [profileResponse, targetResponse, candidateResponse] = await Promise.all([
+    const [profileResponse, targetResponse, candidateResponse, confirmationResponse] = await Promise.all([
       fetch('/api/browser-profiles'),
       fetch('/api/publish-targets?platform=facebook'),
       fetch('/api/facebook-page-candidates'),
+      fetch('/api/facebook-target-confirmations'),
     ])
     const loadedProfiles = await readJson<BrowserProfile[]>(profileResponse)
     const loadedTargets = await readJson<PublishTarget[]>(targetResponse)
     const loadedCandidates = await readJson<TargetCandidate[]>(candidateResponse)
+    const loadedConfirmations = await readJson<TargetConfirmation[]>(confirmationResponse)
     setProfiles(loadedProfiles)
     setTargets(loadedTargets)
     setCandidates(loadedCandidates)
+    setConfirmations(loadedConfirmations)
 
     setSelectedCandidate((current) => {
       const next = { ...current }
@@ -131,7 +168,7 @@ export default function FacebookTargetPanel() {
 
   const scanTargets = async (profile: BrowserProfile) => {
     setBusyId(profile.profile_id)
-    setMessage(`正在扫描 iX ${profile.name} 的 Facebook 个人主页和公共主页…`)
+    setMessage(`正在扫描 iX ${profile.name} 的 Facebook 发布目标…`)
     try {
       const result = await readJson<ScanResult>(
         await fetch(`/api/browser-profiles/${profile.profile_id}/facebook-pages/scan`, {
@@ -149,9 +186,7 @@ export default function FacebookTargetPanel() {
           [profile.profile_id]: targetMatch?.id ?? result.items[0].id,
         }))
       }
-      const personalCount = result.items.filter((item) => item.target_type === 'profile').length
-      const pageCount = result.items.filter((item) => item.target_type === 'page').length
-      setMessage(`iX ${profile.name} 扫描完成：个人主页 ${personalCount} 个，公共主页 ${pageCount} 个。`)
+      setMessage(`iX ${profile.name} 扫描完成：发现 ${result.items.length} 个 Facebook 发布目标。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -162,7 +197,7 @@ export default function FacebookTargetPanel() {
   const setDefault = async (profile: BrowserProfile) => {
     const candidateId = selectedCandidate[profile.profile_id]
     if (!candidateId) {
-      setMessage(`请先扫描 iX ${profile.name}，并选择一个 Facebook 个人主页或公共主页。`)
+      setMessage(`请先扫描 iX ${profile.name}，并选择一个 Facebook 发布目标。`)
       return
     }
 
@@ -176,7 +211,33 @@ export default function FacebookTargetPanel() {
         ),
       )
       await load()
-      setMessage(`iX ${profile.name} 的默认 Facebook 发布主页已设置为：${target.target_name}`)
+      setMessage(`iX ${profile.name} 的默认 Facebook 发布目标已设置为：${target.target_name}。请确认发帖入口后再进行发布测试。`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const confirmComposer = async (profile: BrowserProfile) => {
+    const target = targetByProfile.get(profile.profile_id)
+    if (!target) {
+      setMessage(`iX ${profile.name} 尚未设置 Facebook 默认发布目标。`)
+      return
+    }
+
+    setBusyId(profile.profile_id)
+    setMessage(`正在确认 iX ${profile.name} / ${target.target_name} 的真实发帖入口。不会输入内容，也不会点击发布…`)
+    try {
+      const result = await readJson<ConfirmResult>(
+        await fetch(`/api/browser-profiles/${profile.profile_id}/facebook-composer/confirm`, {
+          method: 'POST',
+        }),
+      )
+      await load()
+      setMessage(
+        `发帖入口确认成功：目标 ID ${result.target_id}，当前身份 ID ${result.actor_id}，编辑器和发布按钮均已确认。`,
+      )
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -210,8 +271,8 @@ export default function FacebookTargetPanel() {
         <div className="target-heading">
           <div>
             <span className="target-kicker">Facebook 发布安全</span>
-            <h2>每个 iX 的默认发布主页</h2>
-            <p>系统只扫描两类真实发布身份：当前 Facebook 账号的个人主页，以及该账号可管理的公共主页。创建帖子、广告中心、消息等功能入口会被过滤。扫描结果不会自动改变发布目标，必须由你明确选择并设为默认。</p>
+            <h2>每个 iX 的默认发布目标</h2>
+            <p>个人主页和公共主页统一视为 Facebook 发布目标。系统最终只认 target ID：当前 Facebook actor ID 必须与目标 ID 完全一致。设为默认后，还必须通过“确认发帖入口”行为验证，确认真实编辑器与发布按钮都存在。</p>
           </div>
           <button className="target-refresh" onClick={() => load().catch((error: Error) => setMessage(error.message))}>
             刷新
@@ -223,6 +284,9 @@ export default function FacebookTargetPanel() {
         <div className="target-list">
           {profiles.filter((profile) => profile.is_available).map((profile, index) => {
             const target = targetByProfile.get(profile.profile_id)
+            const confirmation = target
+              ? confirmationByTarget.get(confirmationKey(profile.profile_id, target.target_id))
+              : undefined
             const availableTargets = candidatesByProfile.get(profile.profile_id) ?? []
             const busy = busyId === profile.profile_id
             const selectedId = selectedCandidate[profile.profile_id] ?? 0
@@ -241,21 +305,24 @@ export default function FacebookTargetPanel() {
                     <>
                       <span className="target-label">当前默认</span>
                       <strong>{target.target_name}</strong>
-                      <small>{targetTypeLabel(target.target_type)} · {target.target_id}</small>
+                      <small>{targetTypeLabel(target.target_type)} · ID {target.target_id}</small>
+                      <small className={confirmation ? 'target-confirmed' : 'target-unconfirmed'}>
+                        发帖入口：{confirmation ? '已确认' : '未确认'}
+                      </small>
                       <a href={target.target_url} target="_blank" rel="noreferrer">查看目标</a>
                     </>
                   ) : (
                     <>
                       <span className="target-label">当前默认</span>
                       <strong>未设置</strong>
-                      <small>未设置时 Facebook 发布任务不会执行</small>
+                      <small>未设置目标时 Facebook 发布任务不会执行</small>
                     </>
                   )}
                 </div>
 
                 <div className="target-discovery">
                   <div className="target-discovery-head">
-                    <strong>扫描到的发布主页</strong>
+                    <strong>扫描到的发布目标</strong>
                     <span>{availableTargets.length > 0 ? `${availableTargets.length} 个` : '尚未扫描'}</span>
                   </div>
                   <select
@@ -266,7 +333,7 @@ export default function FacebookTargetPanel() {
                       [profile.profile_id]: Number(event.target.value),
                     }))}
                   >
-                    {availableTargets.length === 0 && <option value="">请先扫描发布主页</option>}
+                    {availableTargets.length === 0 && <option value="">请先扫描发布目标</option>}
                     {availableTargets.map((candidate) => (
                       <option key={candidate.id} value={candidate.id}>
                         {targetTypeLabel(candidate.target_type)} · {candidate.target_name} · {candidate.target_id}
@@ -277,11 +344,16 @@ export default function FacebookTargetPanel() {
 
                 <div className="target-actions">
                   <button disabled={busy} onClick={() => scanTargets(profile)}>
-                    {busy ? '处理中…' : '扫描发布主页'}
+                    {busy ? '处理中…' : '扫描发布目标'}
                   </button>
                   <button className="target-primary" disabled={busy || availableTargets.length === 0} onClick={() => setDefault(profile)}>
                     设为默认
                   </button>
+                  {target && (
+                    <button className="target-confirm" disabled={busy} onClick={() => confirmComposer(profile)}>
+                      {confirmation ? '重新确认发帖入口' : '确认发帖入口'}
+                    </button>
+                  )}
                   <button disabled={busy} onClick={() => openProfile(profile)}>
                     打开环境
                   </button>
