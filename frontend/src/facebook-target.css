@@ -66,6 +66,12 @@
   background: #274d86;
 }
 
+.target-actions .target-confirm {
+  border-color: #8aa5cc;
+  background: #f3f7fc;
+  color: #244b7d;
+}
+
 .target-notice {
   border: 1px solid #cfd8e6;
   background: #f6f9fd;
@@ -110,6 +116,16 @@
   display: block;
   margin-top: 4px;
   color: #7a8495;
+}
+
+.target-current .target-confirmed {
+  color: #237a4b;
+  font-weight: 700;
+}
+
+.target-current .target-unconfirmed {
+  color: #a15c00;
+  font-weight: 700;
 }
 
 .target-label {
