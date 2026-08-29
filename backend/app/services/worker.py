@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.content import ContentItem, MediaAsset, PublishJob
 from app.models.execution import WorkerTask, utcnow
+from app.models.publish_target import PublishTarget
 from app.services.browser_sessions import browser_sessions
 from app.services.content_store import get_media_path
 from app.services.platforms.base import (
@@ -126,6 +127,18 @@ class WorkerManager:
             if job.status not in {"draft", "failed"}:
                 raise ValueError(f"Publish job cannot run from status '{job.status}'.")
 
+            if job.platform == "facebook":
+                target = db.scalar(
+                    select(PublishTarget).where(
+                        PublishTarget.profile_id == job.profile_id,
+                        PublishTarget.platform == "facebook",
+                    )
+                )
+                if target is None:
+                    raise ValueError(
+                        f"iX #{job.profile_id} 尚未设置 Facebook 默认发布主页。"
+                    )
+
             task = WorkerTask(
                 task_type="publish",
                 profile_id=job.profile_id,
@@ -225,9 +238,6 @@ class WorkerManager:
                     profile_id=profile_id,
                     owner_id=owner_id,
                     task_id=task_id,
-                    # Large video uploads can take a long time. Startup recovery
-                    # clears stale locks after process crashes; this TTL protects
-                    # against a hung process without expiring during normal media work.
                     ttl_seconds=7200,
                 )
 
@@ -263,7 +273,6 @@ class WorkerManager:
                     error_message="Platform adapter returned without confirming submission.",
                 )
         except ProfileBusyError as exc:
-            # No platform action occurred. Leave the publish job retryable.
             self._mark_publish_result(job_id, task_id, "draft", task_status="blocked", error_message=str(exc))
         except PlatformNeedsReviewError as exc:
             self._mark_publish_result(
@@ -312,7 +321,26 @@ class WorkerManager:
                 )
                 for asset in assets
             )
-            return job.platform, PlatformContent(text=content.text, media=media)
+
+            target = db.scalar(
+                select(PublishTarget).where(
+                    PublishTarget.profile_id == job.profile_id,
+                    PublishTarget.platform == job.platform,
+                )
+            )
+            if job.platform == "facebook" and target is None:
+                raise PlatformValidationError(
+                    f"iX #{job.profile_id} 尚未设置 Facebook 默认发布主页。"
+                )
+
+            return job.platform, PlatformContent(
+                text=content.text,
+                media=media,
+                target_type=target.target_type if target else None,
+                target_id=target.target_id if target else None,
+                target_name=target.target_name if target else None,
+                target_url=target.target_url if target else None,
+            )
 
     def _mark_publish_result(
         self,
