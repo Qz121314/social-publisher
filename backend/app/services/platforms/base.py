@@ -12,6 +12,23 @@ class PlatformValidationError(ValueError):
     """Raised when content is incompatible with a platform adapter."""
 
 
+class PlatformPublishError(RuntimeError):
+    """Raised when a publish attempt failed before a confirmed submission."""
+
+
+class PlatformNeedsReviewError(RuntimeError):
+    """Raised when human review is required before retrying a job.
+
+    `submitted=True` means the adapter may already have submitted the post. The
+    worker must not retry such a job automatically because that could create a
+    duplicate post.
+    """
+
+    def __init__(self, message: str, *, submitted: bool = False) -> None:
+        super().__init__(message)
+        self.submitted = submitted
+
+
 @dataclass(frozen=True)
 class PlatformCapabilities:
     name: str
