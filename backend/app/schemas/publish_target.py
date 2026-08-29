@@ -20,3 +20,25 @@ class PublishTargetRead(BaseModel):
     target_url: str
     created_at: datetime
     updated_at: datetime
+
+
+class PublishTargetCandidateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    platform: str
+    target_type: str
+    target_id: str
+    target_name: str
+    target_url: str
+    source: str
+    is_available: bool
+    created_at: datetime
+    last_seen_at: datetime
+
+
+class FacebookPageScanRead(BaseModel):
+    profile_id: int
+    count: int
+    items: list[PublishTargetCandidateRead]
