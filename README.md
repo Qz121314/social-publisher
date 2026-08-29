@@ -12,7 +12,8 @@ Manage multiple social accounts, schedule content, and execute publishing jobs t
 - **Backend:** Python 3.12 + FastAPI
 - **Database:** SQLite + SQLAlchemy
 - **Browser layer:** iXBrowser Local API + Selenium 4
-- **Scheduling:** APScheduler / worker layer
+- **Execution:** bounded worker pool + database-backed profile locks
+- **Scheduling:** APScheduler layer (next milestone)
 - **Platform layer:** independent adapters per platform
 
 ## Current milestone
@@ -30,7 +31,11 @@ The repository currently includes:
 - iX profile open/close lifecycle through the official Local API
 - Selenium 4 attachment using the `webdriver` and `debugging_address` returned by iXBrowser
 - Live Selenium session health checks and current page/title reporting
-- Browser-control UI for Open, Check and Close actions
+- Database-backed `profile_locks` so one automation task owns a profile at a time
+- Persistent `worker_tasks` execution history
+- Bounded `ThreadPoolExecutor` with 3 concurrent workers
+- Diagnostic worker task that acquires a profile lock, opens/attaches Selenium, verifies the session, closes the profile when appropriate, and releases the lock
+- Startup recovery that clears stale runtime locks and marks unfinished diagnostic tasks as interrupted instead of silently rerunning them
 
 A single iX profile can be linked to different platforms, while the same profile cannot be linked twice to the same platform.
 
@@ -49,9 +54,11 @@ Main tables:
 ```text
 browser_profiles
 accounts
+profile_locks
+worker_tasks
 ```
 
-`browser_profiles` is a local cache of iXBrowser profiles. `accounts` stores the platform account binding and references `ix_profile_id`.
+`browser_profiles` is a local cache of iXBrowser profiles. `accounts` stores platform account bindings. `profile_locks` is the exclusive runtime ownership record for an iX profile. `worker_tasks` stores generic background execution history and is intentionally separate from the future platform-specific publish-job table.
 
 ## Local API
 
@@ -116,7 +123,33 @@ Vite proxies `/api` and `/health` to the FastAPI process on port `8765`.
 7. Click **Check** to verify Selenium can still read the browser title, URL and window list.
 8. Click **Close** to close the iX profile and stop the local WebDriver service.
 
-Live Selenium sessions are currently stored in backend process memory. If the FastAPI process is restarted, the in-memory session registry is lost even if an iX window remains open. The next milestone adds profile locking, ownership and recovery behavior for worker execution.
+Manual browser-control endpoints reject operations while a worker owns the profile lock.
+
+## Worker / lock workflow
+
+The diagnostic worker endpoint is the first end-to-end test of the execution model:
+
+```text
+POST /api/worker/test/{profile_id}
+```
+
+It performs:
+
+```text
+queued
+  -> running
+  -> acquire profile lock
+  -> open iX profile
+  -> attach Selenium
+  -> read browser state
+  -> close profile if the worker opened it
+  -> release profile lock
+  -> succeeded / failed / blocked
+```
+
+The worker pool currently allows at most 3 concurrent tasks. A second task that races for the same profile cannot control that browser simultaneously; the database primary key on `profile_locks.profile_id` makes the lock exclusive.
+
+On backend restart, unfinished diagnostic tasks are marked `interrupted`. They are not automatically replayed, which prevents accidental duplicate browser actions.
 
 ## Account workflow
 
@@ -136,6 +169,13 @@ GET    /api/browser-sessions
 POST   /api/browser-profiles/{profile_id}/open
 POST   /api/browser-profiles/{profile_id}/probe
 POST   /api/browser-profiles/{profile_id}/close
+
+GET    /api/profile-locks
+POST   /api/profile-locks/cleanup
+GET    /api/worker/tasks
+GET    /api/worker/tasks/{task_id}
+POST   /api/worker/test/{profile_id}
+
 GET    /api/accounts
 POST   /api/accounts
 PATCH  /api/accounts/{account_id}
@@ -148,10 +188,10 @@ DELETE /api/accounts/{account_id}
 2. iXBrowser Local API connectivity and profile sync — done
 3. SQLite and account management — done
 4. Selenium attach/open/close lifecycle — done
-5. Profile locking and worker execution model
+5. Profile locking and worker execution model — done
 6. Facebook single-account publishing proof of concept
 7. Media publishing and verification
-8. Scheduled jobs and multi-account worker pool
+8. Scheduled jobs and multi-account scheduling
 9. Batch scheduling and execution history
 10. Additional platform adapters
 
