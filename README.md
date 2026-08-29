@@ -27,6 +27,10 @@ The repository currently includes:
 - iX profile sync into SQLite
 - Account create, list, edit, enable/disable and delete APIs
 - Local account-management interface
+- iX profile open/close lifecycle through the official Local API
+- Selenium 4 attachment using the `webdriver` and `debugging_address` returned by iXBrowser
+- Live Selenium session health checks and current page/title reporting
+- Browser-control UI for Open, Check and Close actions
 
 A single iX profile can be linked to different platforms, while the same profile cannot be linked twice to the same platform.
 
@@ -57,7 +61,7 @@ iXBrowser Local API defaults to:
 http://127.0.0.1:53200/api/v2/
 ```
 
-The iXBrowser desktop client must be running and Local API must be enabled before profile sync can succeed.
+The iXBrowser desktop client must be running and Local API must be enabled before profile sync or browser lifecycle operations can succeed.
 
 ## Backend development
 
@@ -101,15 +105,25 @@ http://127.0.0.1:5173
 
 Vite proxies `/api` and `/health` to the FastAPI process on port `8765`.
 
-## Account workflow
+## Browser workflow
 
 1. Start iXBrowser and enable Local API.
 2. Start the backend and frontend.
 3. Open the local admin.
 4. Click **Sync iX Profiles**.
-5. Select an iX profile and platform.
-6. Create the account binding.
-7. Enable/disable, edit or delete bindings from the account table.
+5. In **iXBrowser profiles**, click **Open** on a profile.
+6. The backend opens the iX profile and attaches Selenium to the returned debugging address.
+7. Click **Check** to verify Selenium can still read the browser title, URL and window list.
+8. Click **Close** to close the iX profile and stop the local WebDriver service.
+
+Live Selenium sessions are currently stored in backend process memory. If the FastAPI process is restarted, the in-memory session registry is lost even if an iX window remains open. The next milestone adds profile locking, ownership and recovery behavior for worker execution.
+
+## Account workflow
+
+1. Sync iX profiles.
+2. Select an iX profile and platform.
+3. Create the account binding.
+4. Enable/disable, edit or delete bindings from the account table.
 
 ## API endpoints
 
@@ -118,6 +132,10 @@ GET    /api/status
 GET    /api/ixbrowser/profiles
 POST   /api/ixbrowser/sync
 GET    /api/browser-profiles
+GET    /api/browser-sessions
+POST   /api/browser-profiles/{profile_id}/open
+POST   /api/browser-profiles/{profile_id}/probe
+POST   /api/browser-profiles/{profile_id}/close
 GET    /api/accounts
 POST   /api/accounts
 PATCH  /api/accounts/{account_id}
@@ -129,7 +147,7 @@ DELETE /api/accounts/{account_id}
 1. Project skeleton and local web admin — done
 2. iXBrowser Local API connectivity and profile sync — done
 3. SQLite and account management — done
-4. Selenium attach/open/close lifecycle
+4. Selenium attach/open/close lifecycle — done
 5. Profile locking and worker execution model
 6. Facebook single-account publishing proof of concept
 7. Media publishing and verification
