@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import parse_qs, urlparse
 
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
@@ -92,6 +93,10 @@ class FacebookAdapter(PlatformAdapter):
 
     def publish(self, driver: Chrome, content: PlatformContent) -> dict[str, Any]:
         self.validate_content(content)
+        if not content.target_url or not content.target_id:
+            raise PlatformPublishError(
+                "该 iX 环境尚未设置 Facebook 默认发布主页，已停止发布以避免发错位置。"
+            )
 
         login = self.check_login(driver)
         if login["checkpoint"]:
@@ -102,6 +107,8 @@ class FacebookAdapter(PlatformAdapter):
             raise PlatformNeedsReviewError(
                 "Facebook is not logged in for this iX profile. Log in manually before retrying."
             )
+
+        self._navigate_to_target(driver, content)
 
         # Everything before the final click is safe to classify as failed/retryable.
         try:
@@ -143,6 +150,10 @@ class FacebookAdapter(PlatformAdapter):
             "verification": verification["message"],
             "current_url": current_url,
             "title": title,
+            "target_type": content.target_type,
+            "target_id": content.target_id,
+            "target_name": content.target_name,
+            "target_url": content.target_url,
         }
 
     def _ensure_facebook(self, driver: Chrome) -> None:
@@ -152,6 +163,44 @@ class FacebookAdapter(PlatformAdapter):
             lambda browser: browser.execute_script("return document.readyState")
             in ("interactive", "complete")
         )
+
+    def _navigate_to_target(self, driver: Chrome, content: PlatformContent) -> None:
+        target_url = content.target_url or ""
+        driver.get(target_url)
+        WebDriverWait(driver, self.DEFAULT_TIMEOUT).until(
+            lambda browser: browser.execute_script("return document.readyState")
+            in ("interactive", "complete")
+        )
+
+        if self._has_security_challenge(driver):
+            raise PlatformNeedsReviewError(
+                "Facebook 打开了安全验证页面，请人工处理后再发布。"
+            )
+
+        current_url = driver.current_url or ""
+        if not self._target_matches(target_url, current_url):
+            raise PlatformNeedsReviewError(
+                f"Facebook 默认发布目标校验失败。预期 {content.target_name or content.target_id}，实际页面为 {current_url}。已停止发布以避免发错主页。"
+            )
+
+    @staticmethod
+    def _target_matches(expected_url: str, current_url: str) -> bool:
+        expected = urlparse(expected_url)
+        current = urlparse(current_url)
+        current_host = current.netloc.lower().split(":", 1)[0]
+        if current_host not in {"facebook.com", "www.facebook.com", "m.facebook.com"}:
+            return False
+
+        expected_path = expected.path.strip("/")
+        current_path = current.path.strip("/")
+        if expected_path.lower() == "profile.php":
+            expected_id = parse_qs(expected.query).get("id", [None])[0]
+            current_id = parse_qs(current.query).get("id", [None])[0]
+            return bool(expected_id and current_path.lower() == "profile.php" and current_id == expected_id)
+
+        expected_root = expected_path.split("/", 1)[0].lower()
+        current_root = current_path.split("/", 1)[0].lower()
+        return bool(expected_root and expected_root == current_root)
 
     def _open_composer(self, driver: Chrome) -> WebElement:
         dialog_before = self._visible_dialogs(driver)
