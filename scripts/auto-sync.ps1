@@ -12,7 +12,7 @@ function Write-Status([string]$Message) {
 }
 
 Write-Status "Auto-sync started for $RepoRoot"
-Write-Status "Watching origin/main every $IntervalSeconds seconds. Local edits pause pulling automatically."
+Write-Status "Watching origin/main every $IntervalSeconds seconds. Tracked local edits pause pulling automatically."
 
 while ($true) {
     try {
@@ -30,9 +30,12 @@ while ($true) {
             continue
         }
 
-        $dirty = & git status --porcelain
+        # Protect edits to tracked project files, but do not let generated/untracked
+        # files (for example npm package-lock files or local runtime artifacts)
+        # block remote updates. Git itself still refuses unsafe overwrites.
+        $dirty = & git status --porcelain --untracked-files=no
         if ($dirty) {
-            Write-Status 'Local changes detected. Auto-pull paused to protect your work.'
+            Write-Status 'Tracked local changes detected. Auto-pull paused to protect your work.'
             Start-Sleep -Seconds $IntervalSeconds
             continue
         }
