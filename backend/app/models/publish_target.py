@@ -65,3 +65,34 @@ class PublishTargetCandidate(Base):
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
+
+
+class PublishTargetConfirmation(Base):
+    """Behavior-confirmed publishing entry for one iX + platform + target ID."""
+
+    __tablename__ = "publish_target_confirmations"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "platform",
+            "target_id",
+            name="uq_publish_target_confirmation_profile_platform_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("browser_profiles.profile_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    entry_signature_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
