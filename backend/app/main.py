@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from app.api.routes import router
 from app.database import init_db
@@ -25,6 +25,21 @@ app = FastAPI(
 app.include_router(router, prefix="/api")
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "app": "Social Publisher",
+        "status": "ok",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
