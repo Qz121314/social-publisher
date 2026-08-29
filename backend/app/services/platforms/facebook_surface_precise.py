@@ -5,6 +5,7 @@ from typing import Any
 
 from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
 from selenium.webdriver import Chrome
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 
@@ -13,16 +14,15 @@ from app.services.platforms.facebook_surface import FacebookSurfaceAdapter
 
 
 class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
-    """Prefer Facebook's real composer-card input over broad page text matches.
+    """Drive Facebook's composer through the same visible UI a user operates.
 
-    Facebook profile/Page documents contain large ancestor nodes whose text also
-    includes the composer prompt. Treating every such ancestor as a candidate can
-    make automation appear stuck because each false candidate waits for a modal.
+    The adapter does not rely on page-sized text ancestors or a synthetic hidden
+    action. It resolves the compact visible composer prompt (for example
+    ``分享新鲜事`` / ``What's on your mind``), scrolls it into view, performs a
+    normal pointer click, then waits for Facebook's Create Post surface.
 
-    This adapter first resolves the compact, interactive prompt control visible in
-    the actual composer card (for example ``分享新鲜事`` / ``What's on your mind``),
-    tries only a few high-confidence controls, and verifies the resulting Create
-    Post surface. The actor-ID gates and final publish safety remain inherited.
+    Text entry and media upload continue through the visible composer/editor and
+    Facebook file input. Actor-ID gates and final publish safety remain inherited.
     """
 
     _PRIMARY_PROMPTS = (
@@ -52,15 +52,14 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
                 driver.execute_script("window.scrollTo(0, arguments[0]);", y)
             except WebDriverException:
                 pass
-            time.sleep(0.3)
+            time.sleep(0.25)
 
             entries = self._primary_entry_controls(driver)
             if not entries:
-                # Keep a tightly bounded fallback for layouts whose prompt lacks
-                # normal button/textbox semantics. Never iterate the whole page.
-                entries = self._facebook_entry_controls(driver)[:3]
+                # Tightly bounded fallback only. Never walk page-sized ancestors.
+                entries = self._facebook_entry_controls(driver)[:2]
 
-            for entry in entries[:4]:
+            for entry in entries[:3]:
                 try:
                     fingerprint = self._fingerprint(entry)
                     label = self._fingerprint_text(fingerprint)
@@ -70,18 +69,19 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
                     self._scroll_entry_into_view(driver, entry)
                     state_before = self._surface_state(driver)
 
-                    # Native click first: this is closest to a real user click and
-                    # works for the current Facebook composer card.
-                    self._safe_click(driver, entry)
+                    # Use a normal pointer interaction first. This is deliberately
+                    # different from firing a page-wide JavaScript action: it
+                    # follows the visible Facebook UI in the same order a user does.
+                    self._pointer_click(driver, entry)
                     located = self._wait_for_surface(driver, state_before, timeout=4.0)
 
-                    # Some FB builds attach the click handler to a nested/parent
-                    # React node while Selenium's native click lands on a child.
-                    # If nothing opened, invoke that same confirmed control once
-                    # through DOM click; this is not a blind page-wide JS action.
+                    # A small number of Facebook builds attach the handler to the
+                    # same control but WebDriver's pointer action can be intercepted
+                    # by a transient overlay. Retry the same confirmed control once
+                    # with WebElement.click(); do not search/click unrelated nodes.
                     if located is None and self._surface_state(driver) == state_before:
                         try:
-                            driver.execute_script("arguments[0].click();", entry)
+                            entry.click()
                         except WebDriverException:
                             pass
                         located = self._wait_for_surface(driver, state_before, timeout=3.0)
@@ -94,7 +94,7 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
                             "editor": self._element_signature(editor),
                             "post_button": self._element_signature(post_button),
                             "surface": self._element_signature(surface),
-                            "strategy": "precise_composer_card",
+                            "strategy": "visible_ui_pointer_click",
                         }
 
                     self._dismiss_transient_ui(driver)
@@ -104,8 +104,8 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
         sample = " | ".join(checked[-6:])
         suffix = f" 已检查主发帖控件：{sample}" if sample else ""
         raise PlatformPublishError(
-            "Facebook 目标页面已打开，但主发帖卡片没有成功进入“创建帖子”界面。"
-            " 系统只检查了高置信度的发帖输入区域，不再遍历整页候选控件。"
+            "Facebook 目标页面已打开，但点击可见的“分享新鲜事”输入区后，没有进入“创建帖子”界面。"
+            " 系统只操作高置信度的可见发帖输入区，不会遍历或盲点整页控件。"
             f" 页面={driver.current_url or '-'}。{suffix}"
         )
 
@@ -123,8 +123,8 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
                 rect = element.rect
                 width = float(rect.get("width") or 0)
                 height = float(rect.get("height") or 0)
-                # The main FB composer input is a compact horizontal control, not
-                # a page-sized ancestor container.
+                # The main Facebook composer input is a compact horizontal control,
+                # not a page-sized ancestor container.
                 if width < 120 or height < 20 or height > 180:
                     return
                 candidates[element.id] = element
@@ -151,8 +151,8 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
             except WebDriverException:
                 pass
 
-            # Current Chinese Facebook commonly renders ``分享新鲜事`` on a nested
-            # div/span. Climb only to the nearest interactive ancestor.
+            # Chinese Facebook commonly renders ``分享新鲜事`` on a nested div/span.
+            # Climb only to the nearest interactive ancestor.
             nested_xpath = (
                 "//*[self::span or self::div][normalize-space(.)="
                 f"{literal}]/ancestor-or-self::*["
@@ -164,12 +164,14 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
             except WebDriverException:
                 pass
 
-            # Last precise form: exact prompt node, then the inherited clickable
-            # ancestor resolver. Exact text prevents page-sized ancestor matches.
+            # Exact visible prompt node as the final precise fallback. Clicking the
+            # node itself is valid because Facebook's React click handler bubbles to
+            # the owning composer control, just as a user's pointer click does.
             exact_xpath = f"//*[self::span or self::div][normalize-space(.)={literal}]"
             try:
                 for text_node in driver.find_elements(By.XPATH, exact_xpath):
-                    add(self._clickable_ancestor(driver, text_node) or text_node)
+                    add(text_node)
+                    add(self._clickable_ancestor(driver, text_node))
             except WebDriverException:
                 pass
 
@@ -191,12 +193,20 @@ class PreciseFacebookSurfaceAdapter(FacebookSurfaceAdapter):
             text = " ".join((element.text or "").split()).casefold()
             role_score = 3 if role in {"button", "textbox"} else 1
             prompt_score = 2 if any(p.casefold() in aria for p in self._PRIMARY_PROMPTS) else 1
-            exact_score = 2 if any(text == p.casefold() for p in self._PRIMARY_PROMPTS) else 1
+            exact_score = 3 if any(text == p.casefold() for p in self._PRIMARY_PROMPTS) else 1
             area = float(element.rect.get("width") or 0) * float(element.rect.get("height") or 0)
-            # Smaller compact controls beat broad card/page ancestors.
             return role_score + prompt_score + exact_score, -len(text), -area
         except Exception:
             return (0, 0, 0.0)
+
+    @staticmethod
+    def _pointer_click(driver: Chrome, entry: WebElement) -> None:
+        try:
+            ActionChains(driver).move_to_element(entry).pause(0.1).click().perform()
+            return
+        except WebDriverException:
+            pass
+        entry.click()
 
     @staticmethod
     def _scroll_entry_into_view(driver: Chrome, entry: WebElement) -> None:
