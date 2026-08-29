@@ -5,7 +5,7 @@ from typing import Any
 from selenium.webdriver import Chrome
 
 from app.services.platforms.base import PlatformContent
-from app.services.platforms.facebook_surface import FacebookSurfaceAdapter
+from app.services.platforms.facebook_surface_precise import PreciseFacebookSurfaceAdapter
 
 
 def confirm_facebook_composer_entry(
@@ -25,7 +25,7 @@ def confirm_facebook_composer_entry(
     editor is empty.
     """
 
-    adapter = FacebookSurfaceAdapter()
+    adapter = PreciseFacebookSurfaceAdapter()
     content = PlatformContent(
         text="confirmation-only",
         media=(),
