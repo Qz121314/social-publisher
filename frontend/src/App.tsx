@@ -87,6 +87,50 @@ const platforms = [
   'other',
 ]
 
+const platformLabels: Record<string, string> = {
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  x: 'X',
+  tiktok: 'TikTok',
+  threads: 'Threads',
+  linkedin: 'LinkedIn',
+  youtube: 'YouTube',
+  pinterest: 'Pinterest',
+  other: '其他',
+}
+
+const statusLabels: Record<string, string> = {
+  unknown: '未知',
+  draft: '草稿',
+  queued: '排队中',
+  running: '执行中',
+  succeeded: '成功',
+  failed: '失败',
+  blocked: '已阻止',
+  interrupted: '已中断',
+  needs_review: '待人工确认',
+  enabled: '已启用',
+  disabled: '已停用',
+}
+
+const taskTypeLabels: Record<string, string> = {
+  browser_probe: '浏览器测试',
+  worker_test: '工作进程测试',
+  publish: '发布任务',
+}
+
+function platformLabel(value: string) {
+  return platformLabels[value] ?? value
+}
+
+function statusLabel(value: string) {
+  return statusLabels[value] ?? value
+}
+
+function taskTypeLabel(value: string) {
+  return taskTypeLabels[value] ?? value
+}
+
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
@@ -97,12 +141,12 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    let message = `HTTP ${response.status}`
+    let message = `请求失败（HTTP ${response.status}）`
     try {
       const data = await response.json()
       message = data.detail ?? message
     } catch {
-      // Keep the HTTP fallback.
+      // 保留 HTTP 状态作为兜底错误信息。
     }
     throw new Error(message)
   }
@@ -222,7 +266,7 @@ export default function App() {
         { method: 'POST' },
       )
       await Promise.all([loadProfiles(), loadStatus()])
-      setMessage(`Synced ${result.fetched} iX profiles.`)
+      setMessage(`已同步 ${result.fetched} 个 iX 环境。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -240,8 +284,8 @@ export default function App() {
       await Promise.all([loadSessions(), loadStatus()])
       setMessage(
         session.already_open
-          ? `${profile.name} is already attached to Selenium.`
-          : `${profile.name} opened and Selenium attached successfully.`,
+          ? `${profile.name} 已连接到 Selenium。`
+          : `${profile.name} 已成功打开并连接 Selenium。`,
       )
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
@@ -258,8 +302,8 @@ export default function App() {
         method: 'POST',
       })
       await loadSessions()
-      const page = session.title || session.current_url || 'browser session'
-      setMessage(`${profile.name}: Selenium connection is healthy · ${page}`)
+      const page = session.title || session.current_url || '浏览器会话'
+      setMessage(`${profile.name}：Selenium 连接正常 · ${page}`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
       await loadSessions().catch(() => undefined)
@@ -276,7 +320,7 @@ export default function App() {
         method: 'POST',
       })
       await Promise.all([loadSessions(), loadStatus()])
-      setMessage(`${profile.name} closed.`)
+      setMessage(`${profile.name} 已关闭。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -292,7 +336,7 @@ export default function App() {
         method: 'POST',
       })
       await Promise.all([loadWorkerTasks(), loadLocks(), loadStatus()])
-      setMessage(`${profile.name}: worker task ${shortId(task.id)} queued.`)
+      setMessage(`${profile.name}：测试任务 ${shortId(task.id)} 已进入队列。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -303,7 +347,7 @@ export default function App() {
   const submitAccount = async (event: FormEvent) => {
     event.preventDefault()
     if (!profileId) {
-      setMessage('Select an iX profile first.')
+      setMessage('请先选择一个 iX 环境。')
       return
     }
 
@@ -319,13 +363,13 @@ export default function App() {
     try {
       if (editingId === null) {
         await api<Account>('/api/accounts', { method: 'POST', body: JSON.stringify(payload) })
-        setMessage('Account added.')
+        setMessage('账号已添加。')
       } else {
         await api<Account>(`/api/accounts/${editingId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         })
-        setMessage('Account updated.')
+        setMessage('账号已更新。')
       }
       resetForm()
       await loadAccounts()
@@ -361,13 +405,13 @@ export default function App() {
   }
 
   const removeAccount = async (account: Account) => {
-    if (!window.confirm(`Delete ${account.name}?`)) return
+    if (!window.confirm(`确定删除账号“${account.name}”吗？`)) return
     setBusy(true)
     try {
       await api<void>(`/api/accounts/${account.id}`, { method: 'DELETE' })
       if (editingId === account.id) resetForm()
       await loadAccounts()
-      setMessage('Account deleted.')
+      setMessage('账号已删除。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -379,12 +423,12 @@ export default function App() {
     <main className="shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">LOCAL CONTROL PLANE</p>
-          <h1>Social Publisher</h1>
-          <p className="subtitle">Multi-account publishing powered by isolated iXBrowser profiles.</p>
+          <p className="eyebrow">本地控制台</p>
+          <h1>社媒矩阵发布系统</h1>
+          <p className="subtitle">基于独立 iXBrowser 环境的多账号自动发布管理。</p>
         </div>
         <button className="primary" onClick={syncProfiles} disabled={busy}>
-          {busy ? 'Working…' : 'Sync iX Profiles'}
+          {busy ? '处理中…' : '同步 iX 环境'}
         </button>
       </header>
 
@@ -392,28 +436,28 @@ export default function App() {
 
       <section className="stats">
         <article className="stat-card">
-          <span>Backend</span>
-          <strong>{status?.app === 'ok' ? 'Connected' : status ? 'Offline' : 'Checking…'}</strong>
+          <span>后端服务</span>
+          <strong>{status?.app === 'ok' ? '已连接' : status ? '离线' : '检查中…'}</strong>
           <small>FastAPI · SQLite</small>
         </article>
         <article className="stat-card">
           <span>iXBrowser</span>
-          <strong>{status?.ixbrowser.connected ? 'Connected' : status ? 'Offline' : 'Checking…'}</strong>
+          <strong>{status?.ixbrowser.connected ? '已连接' : status ? '离线' : '检查中…'}</strong>
           <small>
             {status?.ixbrowser.connected
-              ? `${status.ixbrowser.total_profiles ?? 0} profiles · ${sessions.length} Selenium attached`
+              ? `${status.ixbrowser.total_profiles ?? 0} 个环境 · ${sessions.length} 个 Selenium 会话`
               : status?.ixbrowser.message ?? '127.0.0.1:53200'}
           </small>
         </article>
         <article className="stat-card">
-          <span>Worker Pool</span>
+          <span>工作进程</span>
           <strong>{status?.worker ? `${status.worker.active_tasks}/${status.worker.max_workers}` : '—'}</strong>
-          <small>{locks.length} profile lock(s) active</small>
+          <small>{locks.length} 个环境锁正在使用</small>
         </article>
         <article className="stat-card">
-          <span>Accounts</span>
+          <span>账号</span>
           <strong>{accounts.length}</strong>
-          <small>{accounts.filter((item) => item.enabled).length} enabled</small>
+          <small>{accounts.filter((item) => item.enabled).length} 个已启用</small>
         </article>
       </section>
 
@@ -422,27 +466,27 @@ export default function App() {
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">BROWSER CONTROL</p>
-            <h2>iXBrowser profiles</h2>
+            <p className="eyebrow">浏览器控制</p>
+            <h2>iXBrowser 环境</h2>
           </div>
-          <span className="section-meta">{sessions.length} Selenium sessions · {locks.length} locked</span>
+          <span className="section-meta">{sessions.length} 个 Selenium 会话 · {locks.length} 个已锁定</span>
         </div>
 
         {profiles.length === 0 ? (
           <div className="empty-state">
-            <strong>No synced profiles</strong>
-            <span>Start iXBrowser and sync profiles first.</span>
+            <strong>暂无已同步环境</strong>
+            <span>请先启动 iXBrowser，然后点击“同步 iX 环境”。</span>
           </div>
         ) : (
           <div className="table-wrap">
             <table className="browser-table">
               <thead>
                 <tr>
-                  <th>Profile</th>
-                  <th>Group</th>
-                  <th>Lock</th>
+                  <th>环境</th>
+                  <th>分组</th>
+                  <th>锁定状态</th>
                   <th>Selenium</th>
-                  <th>Current page</th>
+                  <th>当前页面</th>
                   <th></th>
                 </tr>
               </thead>
@@ -464,15 +508,15 @@ export default function App() {
                       <td>
                         {profileLock ? (
                           <span className="lock-badge" title={profileLock.owner_id}>
-                            Locked · {shortId(profileLock.task_id)}
+                            已锁定 · {shortId(profileLock.task_id)}
                           </span>
                         ) : (
-                          <span className="idle-label">Idle</span>
+                          <span className="idle-label">空闲</span>
                         )}
                       </td>
                       <td>
                         <span className={`status-dot ${session?.alive ? '' : 'neutral'}`}></span>
-                        {session?.alive ? `Attached · ${session.window_count ?? 0} window(s)` : 'Not attached'}
+                        {session?.alive ? `已连接 · ${session.window_count ?? 0} 个窗口` : '未连接'}
                       </td>
                       <td className="url-cell" title={session?.current_url ?? ''}>
                         {session?.title || session?.current_url || '—'}
@@ -483,28 +527,28 @@ export default function App() {
                           onClick={() => runWorkerTest(profile)}
                           disabled={isWorkerBusy || Boolean(profileLock)}
                         >
-                          {isWorkerBusy ? 'Queueing…' : 'Worker Test'}
+                          {isWorkerBusy ? '加入队列…' : '工作进程测试'}
                         </button>
                         <button
                           className="compact-button"
                           onClick={() => openProfile(profile)}
                           disabled={isBusy || Boolean(session?.alive) || Boolean(profileLock)}
                         >
-                          {isBusy ? 'Working…' : 'Open'}
+                          {isBusy ? '处理中…' : '打开'}
                         </button>
                         <button
                           className="compact-button"
                           onClick={() => probeProfile(profile)}
                           disabled={isBusy || !session?.alive || Boolean(profileLock)}
                         >
-                          Check
+                          检查
                         </button>
                         <button
                           className="compact-button danger-outline"
                           onClick={() => closeProfile(profile)}
                           disabled={isBusy || Boolean(profileLock)}
                         >
-                          Close
+                          关闭
                         </button>
                       </td>
                     </tr>
@@ -519,27 +563,27 @@ export default function App() {
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">EXECUTION</p>
-            <h2>Recent worker tasks</h2>
+            <p className="eyebrow">执行任务</p>
+            <h2>最近的工作任务</h2>
           </div>
-          <span className="section-meta">Max concurrency {status?.worker?.max_workers ?? 3}</span>
+          <span className="section-meta">最大并发数 {status?.worker?.max_workers ?? 3}</span>
         </div>
 
         {workerTasks.length === 0 ? (
           <div className="empty-state compact-empty">
-            <strong>No worker tasks yet</strong>
-            <span>Run a Worker Test on any synced iX profile.</span>
+            <strong>暂无工作任务</strong>
+            <span>可以在任意已同步的 iX 环境上运行“工作进程测试”。</span>
           </div>
         ) : (
           <div className="table-wrap">
             <table className="worker-table">
               <thead>
                 <tr>
-                  <th>Task</th>
-                  <th>Profile</th>
-                  <th>Status</th>
-                  <th>Attempts</th>
-                  <th>Result</th>
+                  <th>任务</th>
+                  <th>环境</th>
+                  <th>状态</th>
+                  <th>尝试次数</th>
+                  <th>结果</th>
                 </tr>
               </thead>
               <tbody>
@@ -547,18 +591,18 @@ export default function App() {
                   const profile = profileById.get(task.profile_id)
                   const resultTitle =
                     typeof task.result === 'object' && task.result !== null
-                      ? String(task.result.title ?? task.result.current_url ?? 'Completed')
+                      ? String(task.result.title ?? task.result.current_url ?? '已完成')
                       : task.error_message || (typeof task.result === 'string' ? task.result : '—')
                   return (
                     <tr key={task.id}>
                       <td>
                         <div className="profile-cell">
                           <strong>{shortId(task.id)}</strong>
-                          <small>{task.task_type}</small>
+                          <small>{taskTypeLabel(task.task_type)}</small>
                         </div>
                       </td>
                       <td>{profile?.name || `#${task.profile_id}`}</td>
-                      <td><span className={`task-status task-${task.status}`}>{task.status}</span></td>
+                      <td><span className={`task-status task-${task.status}`}>{statusLabel(task.status)}</span></td>
                       <td>{task.attempts}</td>
                       <td className="result-cell" title={resultTitle}>{resultTitle}</td>
                     </tr>
@@ -573,27 +617,27 @@ export default function App() {
       <section className="panel form-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">ACCOUNT BINDING</p>
-            <h2>{editingId === null ? 'Add account' : 'Edit account'}</h2>
+            <p className="eyebrow">账号绑定</p>
+            <h2>{editingId === null ? '添加账号' : '编辑账号'}</h2>
           </div>
-          {editingId !== null && <button className="text-button" onClick={resetForm}>Cancel edit</button>}
+          {editingId !== null && <button className="text-button" onClick={resetForm}>取消编辑</button>}
         </div>
 
         <form className="account-form" onSubmit={submitAccount}>
           <label>
-            <span>Display name</span>
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="FB Brand 01" required />
+            <span>显示名称</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：Facebook 品牌账号 01" required />
           </label>
           <label>
-            <span>Platform</span>
+            <span>平台</span>
             <select value={platform} onChange={(event) => setPlatform(event.target.value)}>
-              {platforms.map((item) => <option key={item} value={item}>{item}</option>)}
+              {platforms.map((item) => <option key={item} value={item}>{platformLabel(item)}</option>)}
             </select>
           </label>
           <label>
-            <span>iX Profile</span>
+            <span>iX 环境</span>
             <select value={profileId} onChange={(event) => setProfileId(event.target.value)} required>
-              <option value="">Select profile</option>
+              <option value="">请选择环境</option>
               {profiles.map((profile) => (
                 <option key={profile.profile_id} value={profile.profile_id}>
                   {profile.name} · #{profile.profile_id}{profile.group_name ? ` · ${profile.group_name}` : ''}
@@ -602,11 +646,11 @@ export default function App() {
             </select>
           </label>
           <label className="notes-field">
-            <span>Notes</span>
-            <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional" />
+            <span>备注</span>
+            <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="选填" />
           </label>
           <button className="primary submit-button" disabled={busy} type="submit">
-            {editingId === null ? 'Add account' : 'Save changes'}
+            {editingId === null ? '添加账号' : '保存修改'}
           </button>
         </form>
       </section>
@@ -614,30 +658,30 @@ export default function App() {
       <section className="panel">
         <div className="section-heading account-heading">
           <div>
-            <p className="eyebrow">ACCOUNT CENTER</p>
-            <h2>Accounts</h2>
+            <p className="eyebrow">账号中心</p>
+            <h2>账号管理</h2>
           </div>
           <select className="filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
-            <option value="all">All platforms</option>
-            {platforms.map((item) => <option key={item} value={item}>{item}</option>)}
+            <option value="all">全部平台</option>
+            {platforms.map((item) => <option key={item} value={item}>{platformLabel(item)}</option>)}
           </select>
         </div>
 
         {filteredAccounts.length === 0 ? (
           <div className="empty-state">
-            <strong>No accounts yet</strong>
-            <span>Sync iX profiles, then bind your first platform account.</span>
+            <strong>暂无账号</strong>
+            <span>先同步 iX 环境，再绑定第一个平台账号。</span>
           </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Account</th>
-                  <th>Platform</th>
-                  <th>iX Profile</th>
-                  <th>Status</th>
-                  <th>Enabled</th>
+                  <th>账号</th>
+                  <th>平台</th>
+                  <th>iX 环境</th>
+                  <th>状态</th>
+                  <th>启用</th>
                   <th></th>
                 </tr>
               </thead>
@@ -645,22 +689,22 @@ export default function App() {
                 {filteredAccounts.map((account) => (
                   <tr key={account.id}>
                     <td><strong>{account.name}</strong></td>
-                    <td><span className="platform-pill">{account.platform}</span></td>
+                    <td><span className="platform-pill">{platformLabel(account.platform)}</span></td>
                     <td>
                       <div className="profile-cell">
                         <strong>{account.browser_profile.name}</strong>
                         <small>#{account.ix_profile_id}</small>
                       </div>
                     </td>
-                    <td><span className={`status-dot ${account.status === 'unknown' ? 'neutral' : ''}`}></span>{account.status}</td>
+                    <td><span className={`status-dot ${account.status === 'unknown' ? 'neutral' : ''}`}></span>{statusLabel(account.status)}</td>
                     <td>
                       <button className={`switch ${account.enabled ? 'on' : ''}`} onClick={() => toggleAccount(account)} disabled={busy}>
                         <span></span>
                       </button>
                     </td>
                     <td className="actions">
-                      <button className="text-button" onClick={() => editAccount(account)}>Edit</button>
-                      <button className="text-button danger" onClick={() => removeAccount(account)}>Delete</button>
+                      <button className="text-button" onClick={() => editAccount(account)}>编辑</button>
+                      <button className="text-button danger" onClick={() => removeAccount(account)}>删除</button>
                     </td>
                   </tr>
                 ))}
