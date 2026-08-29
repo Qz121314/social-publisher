@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from contextvars import ContextVar
 from typing import Any
 
 from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
@@ -13,15 +14,20 @@ from app.services.platforms.base import PlatformContent, PlatformPublishError
 from app.services.platforms.facebook_adaptive import AdaptiveFacebookAdapter
 
 
-class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
-    """Facebook adapter that switches the active publishing identity first.
+_ACTIVE_PUBLISH_CONTENT: ContextVar[PlatformContent | None] = ContextVar(
+    "facebook_active_publish_content",
+    default=None,
+)
 
-    Navigating to a profile/Page URL does not necessarily change Facebook's
-    active publishing actor. The switcher is also two-level on many accounts:
-    the first account menu contains a direct "Switch to <personal profile>"
-    action plus a "See all profiles/Pages" action, while managed Pages live in
-    the second-level list. We follow that UI explicitly, verify c_user/i_user,
-    and only then navigate to the configured publish target.
+
+class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
+    """Facebook adapter with a strict target-ID publishing gate.
+
+    The active Facebook publishing actor is determined from stable account IDs:
+    `i_user` when acting as a Page, otherwise `c_user` for the personal profile.
+    Display names, titles and URLs are navigation aids only; they never authorize
+    a publish. The actor ID must match the configured target ID after switching,
+    after target navigation, and immediately before the final Post click.
     """
 
     _ACCOUNT_MENU_LABELS = (
@@ -59,9 +65,60 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         "切换至",
     )
 
+    def publish(self, driver: Chrome, content: PlatformContent) -> dict[str, Any]:
+        token = _ACTIVE_PUBLISH_CONTENT.set(content)
+        try:
+            return super().publish(driver, content)
+        finally:
+            _ACTIVE_PUBLISH_CONTENT.reset(token)
+
     def _navigate_to_target(self, driver: Chrome, content: PlatformContent) -> None:
+        # Gate 1: regardless of what the iX window opened as, the Facebook actor
+        # must first become the configured target ID.
         self._ensure_target_identity(driver, content)
+        self._assert_target_actor(driver, content, stage="身份切换后")
+
+        # URL navigation is secondary. It never substitutes for the actor-ID gate.
         super()._navigate_to_target(driver, content)
+
+        # Gate 2: navigation itself must not have changed the active actor.
+        self._assert_target_actor(driver, content, stage="进入目标主页后")
+
+    def _wait_post_ready(self, driver: Chrome, composer: WebElement) -> WebElement:
+        button = super()._wait_post_ready(driver, composer)
+        content = _ACTIVE_PUBLISH_CONTENT.get()
+        if content is None:
+            raise PlatformPublishError("Facebook 发布上下文丢失，已停止发布。")
+
+        # Gate 3: this is the final guard immediately before the base adapter
+        # clicks Post. A mismatch here is always a safe pre-submission failure.
+        self._assert_target_actor(driver, content, stage="点击发布前")
+        return button
+
+    def _assert_target_actor(
+        self,
+        driver: Chrome,
+        content: PlatformContent,
+        *,
+        stage: str,
+    ) -> None:
+        expected_actor = (content.target_id or "").strip()
+        current_actor = self._current_actor_id(driver)
+        c_user = self._cookie_value(driver, "c_user")
+        i_user = self._cookie_value(driver, "i_user")
+
+        if not expected_actor:
+            raise PlatformPublishError("Facebook 发布目标缺少 target_id，已停止发布。")
+        if not current_actor:
+            raise PlatformPublishError(
+                f"{stage}无法读取 Facebook 当前发布身份 ID，已停止发布。"
+            )
+        if current_actor != expected_actor:
+            raise PlatformPublishError(
+                f"{stage} Facebook 身份 ID 校验失败，已停止发布以避免发错主页。"
+                f" 当前身份={current_actor}，目标身份={expected_actor}，"
+                f"c_user={c_user or '-'}，i_user={i_user or '-'}。"
+            )
 
     def _ensure_target_identity(self, driver: Chrome, content: PlatformContent) -> None:
         expected_actor = (content.target_id or "").strip()
@@ -97,7 +154,7 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         if opener is None:
             raise PlatformPublishError(
                 "需要切换 Facebook 发布身份，但没有找到右上角账号菜单。"
-                f" 当前身份={current_actor or '-'}，目标={content.target_name or expected_actor}。"
+                f" 当前身份={current_actor or '-'}，目标={expected_actor}。"
                 + self._switcher_diagnostics(driver)
             )
 
@@ -131,7 +188,7 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         if target_control is None:
             raise PlatformPublishError(
                 "Facebook 账号菜单已打开，但没有找到设定的发布身份。"
-                f" 目标={content.target_name or expected_actor} ({expected_actor})。"
+                f" 目标ID={expected_actor}。"
                 + self._switcher_diagnostics(driver)
             )
 
@@ -156,7 +213,7 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
             time.sleep(0.5)
 
         raise PlatformPublishError(
-            "已点击 Facebook 身份切换项，但身份校验没有通过，已停止发布以避免发错主页。"
+            "已点击 Facebook 身份切换项，但身份 ID 校验没有通过，已停止发布以避免发错主页。"
             f" 当前身份={last_actor or '-'}，目标身份={expected_actor}。"
         )
 
@@ -241,8 +298,6 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
                 if not value:
                     continue
                 if any(folded.startswith(prefix) for prefix in prefixes):
-                    # Exclude generic "Switch profile(s)" controls; we want the
-                    # concrete action that includes the target person's name.
                     if folded in {"switch profile", "switch profiles", "切换个人主页", "切换个人资料"}:
                         continue
                     matches.append(element)
@@ -268,14 +323,13 @@ class IdentityAwareFacebookAdapter(AdaptiveFacebookAdapter):
         name = " ".join((content.target_name or "").split()).strip()
         expected_actor = (content.target_id or "").strip()
 
-        # Page names are useful after entering Facebook's complete identity list.
-        # Personal-profile switching intentionally does not rely on name matching.
+        # Page names are navigation hints only. The selected result is never
+        # trusted until i_user/current actor equals expected_actor after the click.
         if content.target_type != "profile" and name:
             control = self._find_clickable_by_text(driver, name, right_half_only=True)
             if control is not None:
                 return control
 
-        # Prefer a control that exposes the stable actor ID in href/data attrs.
         if expected_actor:
             try:
                 elements = driver.find_elements(
