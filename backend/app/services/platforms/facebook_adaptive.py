@@ -32,6 +32,7 @@ class AdaptiveFacebookAdapter(FacebookAdapter):
         "说点什么",
         "写点什么",
     )
+    _POST_TEXT = FacebookAdapter._POST_TEXT + ("发帖", "发布帖子")
 
     def _open_composer(self, driver: Chrome) -> WebElement:
         dialogs_before = self._visible_dialogs(driver)
