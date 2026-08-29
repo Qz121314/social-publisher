@@ -4,17 +4,19 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.database import init_db
+from app.services.worker import worker_manager
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
     yield
+    worker_manager.shutdown(wait=False)
 
 
 app = FastAPI(
     title="Social Publisher",
-    version="0.3.0",
+    version="0.4.0",
     description="Local multi-account social publishing control plane.",
     lifespan=lifespan,
 )
