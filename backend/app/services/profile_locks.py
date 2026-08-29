@@ -105,6 +105,11 @@ class ProfileLockManager:
         db.commit()
         return int(result.rowcount or 0)
 
+    def clear_all(self, db: Session) -> int:
+        result = db.execute(delete(ProfileLock))
+        db.commit()
+        return int(result.rowcount or 0)
+
     def list_active(self, db: Session) -> list[ProfileLock]:
         self.cleanup_expired(db)
         statement = select(ProfileLock).order_by(ProfileLock.acquired_at.asc())
