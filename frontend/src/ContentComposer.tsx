@@ -28,6 +28,9 @@ type PublishJob = {
   profile_id: number
   platform: string
   status: string
+  worker_task_id?: string | null
+  published_url?: string | null
+  error_message?: string | null
 }
 
 type ContentItem = {
@@ -56,6 +59,10 @@ function shortId(value: string) {
   return value.slice(0, 8)
 }
 
+function isRunnable(content: ContentItem) {
+  return content.jobs.some((job) => job.status === 'draft' || job.status === 'failed')
+}
+
 export default function ContentComposer({ profiles, onMessage }: Props) {
   const [platforms, setPlatforms] = useState<PlatformCapability[]>([])
   const [platform, setPlatform] = useState('facebook')
@@ -64,6 +71,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
   const [files, setFiles] = useState<File[]>([])
   const [contents, setContents] = useState<ContentItem[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [publishingId, setPublishingId] = useState<string | null>(null)
 
   const availableProfiles = useMemo(
     () => profiles.filter((profile) => profile.is_available),
@@ -71,6 +79,10 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
   )
 
   const selectedSet = useMemo(() => new Set(selectedProfiles), [selectedProfiles])
+  const profileById = useMemo(
+    () => new Map(profiles.map((profile, index) => [profile.profile_id, { profile, index }])),
+    [profiles],
+  )
 
   const loadPlatforms = async () => {
     const response = await fetch('/api/platforms')
@@ -90,6 +102,11 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
 
   useEffect(() => {
     Promise.all([loadPlatforms(), loadContents()]).catch((error: Error) => onMessage(error.message))
+
+    const timer = window.setInterval(() => {
+      loadContents().catch(() => undefined)
+    }, 3000)
+    return () => window.clearInterval(timer)
   }, [])
 
   const toggleProfile = (profileId: number) => {
@@ -147,11 +164,45 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
     }
   }
 
+  const publishNow = async (content: ContentItem) => {
+    setPublishingId(content.id)
+    onMessage(null)
+    try {
+      const response = await fetch(`/api/contents/${content.id}/run`, { method: 'POST' })
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`
+        try {
+          const data = await response.json()
+          detail = data.detail ?? detail
+        } catch {
+          // Keep fallback.
+        }
+        throw new Error(detail)
+      }
+      const result = await response.json() as { queued_count: number }
+      await loadContents()
+      onMessage(`Queued ${result.queued_count} Facebook publish job(s) for draft ${shortId(content.id)}.`)
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setPublishingId(null)
+    }
+  }
+
   const removeContent = async (content: ContentItem) => {
     if (!window.confirm(`Delete draft ${shortId(content.id)} and its local media files?`)) return
     try {
       const response = await fetch(`/api/contents/${content.id}`, { method: 'DELETE' })
-      if (!response.ok) throw new Error(`Delete failed (${response.status}).`)
+      if (!response.ok) {
+        let detail = `Delete failed (${response.status}).`
+        try {
+          const data = await response.json()
+          detail = data.detail ?? detail
+        } catch {
+          // Keep fallback.
+        }
+        throw new Error(detail)
+      }
       await loadContents()
       onMessage(`Draft ${shortId(content.id)} deleted.`)
     } catch (error) {
@@ -275,10 +326,10 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">DRAFT LIBRARY</p>
+            <p className="eyebrow">PUBLISH QUEUE</p>
             <h2>Recent content</h2>
           </div>
-          <span className="section-meta">{contents.length} recent draft(s)</span>
+          <span className="section-meta">{contents.length} recent item(s)</span>
         </div>
 
         {contents.length === 0 ? (
@@ -295,7 +346,7 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                   <th>Platform</th>
                   <th>Content</th>
                   <th>Media</th>
-                  <th>Targets</th>
+                  <th>Target jobs</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
@@ -323,10 +374,42 @@ export default function ContentComposer({ profiles, onMessage }: Props) {
                         ))}
                       </div>
                     </td>
-                    <td>{content.jobs.length}</td>
+                    <td>
+                      <div className="job-targets">
+                        {content.jobs.map((job) => {
+                          const meta = profileById.get(job.profile_id)
+                          const sequence = meta ? String(meta.index + 1).padStart(3, '0') : `#${job.profile_id}`
+                          const label = meta?.profile.name || `iX #${job.profile_id}`
+                          return (
+                            <div className="job-target" key={job.id} title={job.error_message || label}>
+                              <span>{sequence}</span>
+                              <strong>{label}</strong>
+                              <em className={`task-status task-${job.status}`}>{job.status}</em>
+                              {job.published_url && (
+                                <a href={job.published_url} target="_blank" rel="noreferrer">Open post</a>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </td>
                     <td><span className={`task-status task-${content.status}`}>{content.status}</span></td>
-                    <td className="actions">
-                      <button className="text-button danger" onClick={() => removeContent(content)}>Delete</button>
+                    <td className="actions content-actions">
+                      <button
+                        className="compact-button worker-button"
+                        onClick={() => publishNow(content)}
+                        disabled={publishingId === content.id || !isRunnable(content)}
+                        title={isRunnable(content) ? 'Queue all draft/failed targets now' : 'No runnable target jobs'}
+                      >
+                        {publishingId === content.id ? 'Queueing…' : 'Publish now'}
+                      </button>
+                      <button
+                        className="text-button danger"
+                        onClick={() => removeContent(content)}
+                        disabled={content.jobs.some((job) => job.status === 'queued' || job.status === 'running')}
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
