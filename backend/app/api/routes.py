@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.accounts import router as accounts_router
 from app.api.contents import router as contents_router
+from app.api.facebook_flow_config import router as facebook_flow_config_router
 from app.api.facebook_probe import router as facebook_probe_router
 from app.api.publish_targets import router as publish_targets_router
 from app.database import get_db
@@ -20,6 +21,7 @@ router.include_router(accounts_router)
 router.include_router(contents_router)
 router.include_router(publish_targets_router)
 router.include_router(facebook_probe_router)
+router.include_router(facebook_flow_config_router)
 
 
 @router.get("/status")
