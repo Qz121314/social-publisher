@@ -5,7 +5,7 @@ from typing import Any
 from selenium.webdriver import Chrome
 
 from app.services.platforms.base import PlatformContent
-from app.services.platforms.facebook_unified_flow import UnifiedFacebookFlowAdapter
+from app.services.platforms.facebook_configurable_flow import ConfigurableFacebookFlowAdapter
 
 
 def confirm_facebook_composer_entry(
@@ -16,14 +16,14 @@ def confirm_facebook_composer_entry(
     target_url: str,
     target_type: str | None = None,
 ) -> dict[str, Any]:
-    """Confirm the current Facebook composer flow for one target actor.
+    """Confirm the configured Facebook composer flow for one target actor.
 
-    Personal profiles and Pages use the same state machine. The current composer
-    may expose a final Post action immediately or a staged Next -> Post flow.
-    Confirmation never types content and never clicks the final publish action.
+    Personal profiles and Pages use the same state machine. The localized text
+    keywords come from the runtime Facebook flow configuration. Confirmation never
+    types content and never clicks the final publish action.
     """
 
-    adapter = UnifiedFacebookFlowAdapter()
+    adapter = ConfigurableFacebookFlowAdapter()
     content = PlatformContent(
         text="confirmation-only",
         media=(),
