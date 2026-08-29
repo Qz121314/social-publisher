@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 
@@ -68,6 +69,9 @@ DEFAULT_FACEBOOK_FLOW: dict[str, list[str]] = {
 _ALLOWED_KEYS = tuple(DEFAULT_FACEBOOK_FLOW)
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _RUNTIME_PATH = _REPO_ROOT / "data" / "facebook_flow.json"
+_CACHE_LOCK = RLock()
+_CACHE_SIGNATURE: tuple[int, int] | None | object = object()
+_CACHE_VALUE: dict[str, list[str]] | None = None
 
 
 def runtime_path() -> Path:
@@ -78,19 +82,45 @@ def default_config() -> dict[str, list[str]]:
     return deepcopy(DEFAULT_FACEBOOK_FLOW)
 
 
+def _runtime_signature() -> tuple[int, int] | None:
+    try:
+        stat = _RUNTIME_PATH.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _set_cache(signature: tuple[int, int] | None, value: dict[str, list[str]]) -> None:
+    global _CACHE_SIGNATURE, _CACHE_VALUE
+    _CACHE_SIGNATURE = signature
+    _CACHE_VALUE = deepcopy(value)
+
+
 def load_facebook_flow() -> dict[str, list[str]]:
-    if not _RUNTIME_PATH.is_file():
-        return default_config()
+    signature = _runtime_signature()
+    with _CACHE_LOCK:
+        if _CACHE_VALUE is not None and _CACHE_SIGNATURE == signature:
+            return deepcopy(_CACHE_VALUE)
 
-    try:
-        payload = json.loads(_RUNTIME_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return default_config()
+        if signature is None:
+            value = default_config()
+            _set_cache(None, value)
+            return value
 
-    try:
-        return validate_facebook_flow(payload)
-    except ValueError:
-        return default_config()
+        try:
+            payload = json.loads(_RUNTIME_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = default_config()
+            _set_cache(signature, value)
+            return value
+
+        try:
+            value = validate_facebook_flow(payload)
+        except ValueError:
+            value = default_config()
+
+        _set_cache(signature, value)
+        return deepcopy(value)
 
 
 def save_facebook_flow(payload: dict[str, Any]) -> dict[str, list[str]]:
@@ -102,6 +132,8 @@ def save_facebook_flow(payload: dict[str, Any]) -> dict[str, list[str]]:
         encoding="utf-8",
     )
     temp_path.replace(_RUNTIME_PATH)
+    with _CACHE_LOCK:
+        _set_cache(_runtime_signature(), normalized)
     return normalized
 
 
@@ -110,7 +142,10 @@ def reset_facebook_flow() -> dict[str, list[str]]:
         _RUNTIME_PATH.unlink(missing_ok=True)
     except OSError:
         pass
-    return default_config()
+    value = default_config()
+    with _CACHE_LOCK:
+        _set_cache(None, value)
+    return value
 
 
 def validate_facebook_flow(payload: Any) -> dict[str, list[str]]:
