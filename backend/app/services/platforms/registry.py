@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from app.services.platforms.base import PlatformAdapter, PlatformValidationError
 from app.services.platforms.facebook_composite import FacebookCompositeAdapter
+from app.services.platforms.instagram_composite import InstagramCompositeAdapter
 
 _ADAPTERS: dict[str, PlatformAdapter] = {
     "facebook": FacebookCompositeAdapter(),
+    "instagram": InstagramCompositeAdapter(),
 }
 
 
