@@ -76,8 +76,23 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
 }
 
-if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
-    Write-Status 'Installing frontend dependencies...'
+# node_modules may already exist while a newly added package is still missing.
+# npm ls checks package.json against the installed top-level dependency graph so
+# Git auto-sync can safely introduce dependencies without breaking one-click start.
+$frontendDependenciesReady = $false
+if (Test-Path (Join-Path $FrontendDir 'node_modules')) {
+    Push-Location $FrontendDir
+    try {
+        & npm.cmd ls --depth=0 --silent *> $null
+        $frontendDependenciesReady = ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+if (-not $frontendDependenciesReady) {
+    Write-Status 'Installing or repairing frontend dependencies...'
     Push-Location $FrontendDir
     try {
         & npm.cmd install
