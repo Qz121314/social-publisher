@@ -4,6 +4,7 @@ from fastapi import FastAPI, Response
 
 from app.api.routes import router
 from app.database import init_db
+from app.services.attempt_timeline import install_phase6_worker_hooks
 from app.services.browser_sessions import browser_sessions
 from app.services.scheduler import publish_scheduler
 from app.services.worker import worker_manager
@@ -12,6 +13,7 @@ from app.services.worker import worker_manager
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    install_phase6_worker_hooks()
     worker_manager.recover_runtime_state()
     publish_scheduler.start()
     yield
@@ -30,7 +32,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Social Publisher",
-    version="0.10.0",
+    version="0.11.0",
     description="Local V1 social publishing control plane.",
     lifespan=lifespan,
 )
