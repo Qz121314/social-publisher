@@ -80,3 +80,33 @@ class PublishAttempt(Base):
     )
 
     job: Mapped["PublishJob"] = relationship(back_populates="attempts")
+    events: Mapped[list["PublishAttemptEvent"]] = relationship(
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+        order_by="PublishAttemptEvent.sequence",
+    )
+
+
+class PublishAttemptEvent(Base):
+    """Immutable execution event used to build the user-facing task Timeline."""
+
+    __tablename__ = "publish_attempt_events"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "sequence", name="uq_attempt_event_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    attempt_id: Mapped[str] = mapped_column(
+        ForeignKey("publish_attempts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+    attempt: Mapped[PublishAttempt] = relationship(back_populates="events")

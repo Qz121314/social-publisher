@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 from selenium.webdriver import Chrome
 
@@ -27,6 +29,34 @@ class PlatformNeedsReviewError(RuntimeError):
     def __init__(self, message: str, *, submitted: bool = False) -> None:
         super().__init__(message)
         self.submitted = submitted
+
+
+ProgressHandler = Callable[[str, str, dict[str, Any] | None], None]
+_PROGRESS_HANDLER: ContextVar[ProgressHandler | None] = ContextVar(
+    "social_publisher_platform_progress_handler",
+    default=None,
+)
+
+
+@contextmanager
+def platform_progress(handler: ProgressHandler | None) -> Iterator[None]:
+    """Bind one per-attempt progress sink without sharing mutable adapter state."""
+
+    token = _PROGRESS_HANDLER.set(handler)
+    try:
+        yield
+    finally:
+        _PROGRESS_HANDLER.reset(token)
+
+
+def emit_platform_progress(
+    stage: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    handler = _PROGRESS_HANDLER.get()
+    if handler is not None:
+        handler(stage, message, details)
 
 
 @dataclass(frozen=True)
