@@ -23,14 +23,7 @@ _PUBLISH_JOB_COLUMNS: tuple[tuple[str, str], ...] = (
 
 
 def ensure_phase2_schema(engine: Engine) -> bool:
-    """Upgrade the Phase 1 publish_jobs table without losing local task history.
-
-    Phase 1 made content_id/profile_id mandatory and enforced a unique pair. The
-    V1 model must allow a content asset to be published repeatedly, and formal
-    jobs are owned by PublishPlan + Channel instead. SQLite cannot relax NOT NULL
-    or remove a UNIQUE constraint with ALTER COLUMN, so one controlled table
-    rebuild is required for existing local databases.
-    """
+    """Upgrade the Phase 1 publish_jobs table without losing local task history."""
     inspector = inspect(engine)
     if "publish_jobs" not in inspector.get_table_names():
         return False
@@ -68,9 +61,6 @@ def _table_sql(engine: Engine, table_name: str) -> str:
 
 
 def _rebuild_publish_jobs(engine: Engine, existing_columns: set[str]) -> None:
-    # publish_attempts is introduced by Phase 2 and is empty before this first
-    # migration. Dropping it prevents SQLite from retargeting its FK when the
-    # legacy table is renamed; create_all recreates it immediately afterwards.
     raw = engine.raw_connection()
     cursor = raw.cursor()
     try:
@@ -174,12 +164,70 @@ def bootstrap_phase2_records(db: Session) -> dict[str, int]:
     return {"channels_backfilled": channels, "flows_seeded": flows}
 
 
+def sync_channel_from_target(db: Session, target: PublishTarget) -> Channel:
+    """Mirror one configured PublishTarget into the canonical Channel model."""
+    account = db.scalar(
+        select(Account).where(
+            Account.ix_profile_id == target.profile_id,
+            Account.platform == target.platform,
+        )
+    )
+    enabled = account.enabled if account is not None else True
+    health_status = (
+        account.status
+        if account is not None and account.status not in {"", "unknown"}
+        else "unknown"
+    )
+
+    channel = db.scalar(
+        select(Channel).where(
+            Channel.profile_id == target.profile_id,
+            Channel.platform == target.platform,
+            Channel.target_id == target.target_id,
+        )
+    )
+    if channel is None:
+        channel = Channel(
+            profile_id=target.profile_id,
+            platform=target.platform,
+            target_id=target.target_id,
+            target_name=target.target_name,
+            target_type=target.target_type,
+            target_url=target.target_url,
+            enabled=enabled,
+            health_status=health_status,
+            last_checked_at=target.updated_at,
+        )
+        db.add(channel)
+    else:
+        channel.target_name = target.target_name
+        channel.target_type = target.target_type
+        channel.target_url = target.target_url
+        channel.enabled = enabled
+        if health_status != "unknown":
+            channel.health_status = health_status
+        channel.last_checked_at = target.updated_at
+    return channel
+
+
+def disable_channel_for_target(db: Session, target: PublishTarget) -> None:
+    channel = db.scalar(
+        select(Channel).where(
+            Channel.profile_id == target.profile_id,
+            Channel.platform == target.platform,
+            Channel.target_id == target.target_id,
+        )
+    )
+    if channel is None:
+        return
+    channel.enabled = False
+    channel.health_status = "unconfigured"
+    channel.last_checked_at = utcnow()
+
+
 def _backfill_channels(db: Session) -> int:
-    accounts = list(db.scalars(select(Account)).all())
-    account_by_key = {(item.ix_profile_id, item.platform): item for item in accounts}
     targets = list(db.scalars(select(PublishTarget)).all())
     created = 0
-
     for target in targets:
         existing = db.scalar(
             select(Channel).where(
@@ -188,38 +236,9 @@ def _backfill_channels(db: Session) -> int:
                 Channel.target_id == target.target_id,
             )
         )
-        account = account_by_key.get((target.profile_id, target.platform))
-        enabled = account.enabled if account is not None else True
-        health_status = (
-            account.status
-            if account is not None and account.status not in {"", "unknown"}
-            else "unknown"
-        )
-
+        sync_channel_from_target(db, target)
         if existing is None:
-            db.add(
-                Channel(
-                    profile_id=target.profile_id,
-                    platform=target.platform,
-                    target_id=target.target_id,
-                    target_name=target.target_name,
-                    target_type=target.target_type,
-                    target_url=target.target_url,
-                    enabled=enabled,
-                    health_status=health_status,
-                    last_checked_at=target.updated_at,
-                )
-            )
             created += 1
-        else:
-            existing.target_name = target.target_name
-            existing.target_type = target.target_type
-            existing.target_url = target.target_url
-            existing.enabled = enabled
-            if health_status != "unknown":
-                existing.health_status = health_status
-            existing.last_checked_at = target.updated_at
-
     return created
 
 

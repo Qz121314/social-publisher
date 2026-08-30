@@ -18,6 +18,7 @@ from app.schemas.publish_target import (
     PublishTargetRead,
 )
 from app.services.browser_sessions import BrowserSessionError, browser_sessions
+from app.services.domain_bootstrap import disable_channel_for_target, sync_channel_from_target
 from app.services.facebook_pages import FacebookPageDiscoveryError, discover_managed_facebook_pages
 from app.services.ixbrowser import IXBrowserError
 from app.services.profile_locks import ProfileBusyError, profile_locks
@@ -63,8 +64,6 @@ def list_facebook_page_candidates(
     include_unavailable: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> list[PublishTargetCandidate]:
-    # Kept for frontend/backward compatibility. Candidates now contain only
-    # actual publish identities: personal profile or managed Page.
     statement = select(PublishTargetCandidate).where(
         PublishTargetCandidate.platform == "facebook",
         PublishTargetCandidate.target_type.in_(["profile", "page"]),
@@ -225,6 +224,8 @@ def select_facebook_page_target(
         target.target_name = candidate.target_name
         target.target_url = candidate.target_url
 
+    db.flush()
+    sync_channel_from_target(db, target)
     db.commit()
     db.refresh(target)
     return target
@@ -284,6 +285,8 @@ def capture_facebook_target(
         target.target_name = target_name
         target.target_url = target_url
 
+    db.flush()
+    sync_channel_from_target(db, target)
     db.commit()
     db.refresh(target)
     return target
@@ -301,6 +304,7 @@ def clear_facebook_target(profile_id: int, db: Session = Depends(get_db)) -> Res
         )
     )
     if target is not None:
+        disable_channel_for_target(db, target)
         db.delete(target)
         db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
