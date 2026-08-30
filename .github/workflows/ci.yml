@@ -17,7 +17,7 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r backend/requirements.txt
       - name: Compile backend
-        run: python -m compileall -q backend/app backend/validate_phase3.py
+        run: python -m compileall -q backend/app backend/validate_phase3.py backend/validate_phase4.py
       - name: Import FastAPI application
         working-directory: backend
         run: python -c "from app.main import app; print(app.version)"
@@ -30,6 +30,9 @@ jobs:
       - name: Validate Phase 3 formal execution bridge
         working-directory: backend
         run: python validate_phase3.py
+      - name: Validate Phase 4 SQLite scheduler
+        working-directory: backend
+        run: python validate_phase4.py
 
   frontend:
     runs-on: ubuntu-latest
