@@ -77,6 +77,7 @@ const stageLabels: Record<string, string> = {
   scheduled: '等待调度',
   queued: '进入队列',
   opening_browser: '启动浏览器',
+  platform_automation: '平台自动化',
   checking_login: '检查登录',
   checking_identity: '校验发布身份',
   navigating: '打开目标主页',
@@ -221,7 +222,7 @@ export default function TasksPage() {
     setBusyAction('run')
     setError(null)
     try {
-      await api(`/api/publish-jobs/${job.id}/run`, { method: 'POST' })
+      await api(`/api/tasks/publish-jobs/${job.id}/run`, { method: 'POST' })
       await load()
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError))
