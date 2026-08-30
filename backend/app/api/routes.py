@@ -180,26 +180,45 @@ def cleanup_profile_locks(db: Session = Depends(get_db)) -> dict[str, int]:
     return {"removed": profile_locks.cleanup_expired(db)}
 
 
-@router.post("/worker/browser-tests/{profile_id}", status_code=http_status.HTTP_202_ACCEPTED)
-def queue_browser_test(profile_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
-    _require_synced_profile(db, profile_id)
-    try:
-        task = worker_manager.submit_browser_test(profile_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+@router.get("/worker/tasks")
+def list_worker_tasks(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    tasks = worker_manager.list_tasks(db, limit=limit)
+    return {
+        "items": [worker_task_to_dict(task) for task in tasks],
+        "count": len(tasks),
+        "worker": worker_manager.stats(),
+    }
+
+
+@router.get("/worker/tasks/{task_id}")
+def get_worker_task(task_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    task = worker_manager.get_task(db, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Worker task not found.")
     return worker_task_to_dict(task)
 
 
-@router.get("/worker/tasks")
-def worker_tasks(
-    limit: int = Query(default=100, ge=1, le=500),
+@router.post(
+    "/worker/test/{profile_id}",
+    status_code=http_status.HTTP_202_ACCEPTED,
+)
+def run_worker_test(
+    profile_id: int,
     db: Session = Depends(get_db),
-) -> list[dict[str, object]]:
-    return worker_manager.list_tasks(db, limit=limit)
+) -> dict[str, object]:
+    _require_synced_profile(db, profile_id)
+    task = worker_manager.submit_browser_test(profile_id)
+    return worker_task_to_dict(task)
 
 
 def _require_synced_profile(db: Session, profile_id: int) -> BrowserProfile:
     profile = db.get(BrowserProfile, profile_id)
     if profile is None:
-        raise HTTPException(status_code=404, detail="Browser profile not found. Sync iXBrowser first.")
+        raise HTTPException(
+            status_code=404,
+            detail="iX profile is not in the local database. Sync profiles first.",
+        )
     return profile
