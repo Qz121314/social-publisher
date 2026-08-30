@@ -70,6 +70,18 @@ class PublishPlanCreate(BaseModel):
     flow_revision_id: str | None = None
 
 
+class PublishAttemptEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    attempt_id: str
+    sequence: int
+    stage: str
+    message: str
+    details_json: str | None
+    created_at: datetime
+
+
 class PublishAttemptRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,6 +102,7 @@ class PublishAttemptRead(BaseModel):
     result_json: str | None
     error_message: str | None
     created_at: datetime
+    events: list[PublishAttemptEventRead]
 
 
 class DomainPublishJobRead(BaseModel):
