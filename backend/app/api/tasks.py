@@ -92,6 +92,35 @@ def read_task_job(job_id: str, db: Session = Depends(get_db)) -> PublishJob:
     return _get_job(db, job_id)
 
 
+@router.post("/publish-jobs/{job_id}/run", response_model=DomainPublishJobRead)
+def run_task_job(job_id: str, db: Session = Depends(get_db)) -> PublishJob:
+    """Move one safe formal Job to now; Scheduler remains the only dispatcher."""
+
+    job = _get_job(db, job_id)
+    if job.status == "needs_review":
+        raise HTTPException(
+            status_code=409,
+            detail="This job needs manual review before any retry is allowed.",
+        )
+    if job.status not in {"draft", "scheduled", "failed"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Publish job cannot run from status '{job.status}'.",
+        )
+
+    job.status = "scheduled"
+    job.stage = "scheduled"
+    job.scheduled_at = utcnow()
+    job.worker_task_id = None
+    job.error_message = None
+    db.flush()
+    if job.plan_id:
+        PublishScheduler._refresh_plan_status(db, job.plan_id)
+    db.commit()
+    publish_scheduler.wake()
+    return _get_job(db, job_id)
+
+
 @router.post(
     "/publish-jobs/{job_id}/review/confirm-published",
     response_model=DomainPublishJobRead,
