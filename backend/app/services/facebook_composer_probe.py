@@ -4,8 +4,9 @@ from typing import Any
 
 from selenium.webdriver import Chrome
 
-from app.services.platforms.base import PlatformContent
-from app.services.platforms.facebook_configurable_flow import ConfigurableFacebookFlowAdapter
+from app.services.platforms.base import PlatformContent, PlatformPublishError
+from app.services.platforms.facebook_composite import FacebookCompositeAdapter
+from app.services.platforms.registry import get_platform_adapter
 
 
 def confirm_facebook_composer_entry(
@@ -16,14 +17,16 @@ def confirm_facebook_composer_entry(
     target_url: str,
     target_type: str | None = None,
 ) -> dict[str, Any]:
-    """Confirm the configured Facebook composer flow for one target actor.
+    """Confirm the configured Facebook composer through the production adapter.
 
-    Personal profiles and Pages use the same state machine. The localized text
-    keywords come from the runtime Facebook flow configuration. Confirmation never
-    types content and never clicks the final publish action.
+    Confirmation and real publishing now share the same composed Identity /
+    Navigation / Composer stack. It never types content and never clicks the final
+    publish action.
     """
 
-    adapter = ConfigurableFacebookFlowAdapter()
+    adapter = get_platform_adapter("facebook")
+    if not isinstance(adapter, FacebookCompositeAdapter):
+        raise PlatformPublishError("Facebook production adapter is not available.")
     content = PlatformContent(
         text="confirmation-only",
         media=(),
