@@ -165,12 +165,7 @@ def bootstrap_phase2_records(db: Session) -> dict[str, int]:
 
 
 def sync_channel_from_target(db: Session, target: PublishTarget) -> Channel:
-    """Mirror one configured legacy PublishTarget into the canonical Channel model.
-
-    Phase 3 still uses the proven target scanner/selector UI as the configuration
-    mechanism, but every successful selection must immediately become a Channel
-    so the formal PublishPlan path never depends on a process restart/bootstrap.
-    """
+    """Mirror one configured PublishTarget into the canonical Channel model."""
     account = db.scalar(
         select(Account).where(
             Account.ix_profile_id == target.profile_id,
@@ -232,7 +227,6 @@ def disable_channel_for_target(db: Session, target: PublishTarget) -> None:
 
 def _backfill_channels(db: Session) -> int:
     targets = list(db.scalars(select(PublishTarget)).all())
-    before = int(db.scalar(select(Channel).count()) or 0) if False else None
     created = 0
     for target in targets:
         existing = db.scalar(
