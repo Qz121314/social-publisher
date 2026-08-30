@@ -1,0 +1,149 @@
+.v1-publisher-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, .85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.v1-publisher-grid .v1-panel {
+  margin-top: 0;
+}
+
+.v1-asset-preview,
+.v1-file-summary,
+.v1-publish-summary {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e2e6ec;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.v1-asset-preview {
+  display: grid;
+  gap: 6px;
+}
+
+.v1-asset-preview span,
+.v1-asset-preview small,
+.v1-file-summary {
+  color: #6b7685;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.v1-channel-picker {
+  display: grid;
+  gap: 8px;
+  max-height: 430px;
+  overflow: auto;
+}
+
+.v1-channel-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e1e6ed;
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.v1-channel-option:hover,
+.v1-channel-option.selected {
+  border-color: #b8c7da;
+  background: #f4f7fb;
+}
+
+.v1-channel-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.v1-channel-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.v1-channel-option strong {
+  font-size: 13px;
+}
+
+.v1-channel-option small {
+  color: #7b8492;
+  font-size: 11px;
+}
+
+.v1-publish-summary {
+  display: grid;
+  gap: 9px;
+}
+
+.v1-publish-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e9ef;
+  font-size: 12px;
+}
+
+.v1-publish-summary > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.v1-publish-summary span {
+  color: #7b8492;
+}
+
+.v1-publish-submit {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.v1-flow-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-bottom: 12px;
+  color: #697586;
+  font-size: 11px;
+}
+
+.v1-flow-config {
+  display: block;
+  margin-top: 3px;
+  color: #8a93a1;
+  font-weight: 400;
+}
+
+.v1-flow-row.is-disabled {
+  opacity: .55;
+}
+
+.v1-task-result {
+  display: grid;
+  gap: 7px;
+  min-width: 180px;
+  max-width: 360px;
+}
+
+.v1-task-result > span {
+  color: #5f6b7a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.v1-warning-text {
+  color: #b45309;
+  line-height: 1.45;
+}
+
+@media (max-width: 920px) {
+  .v1-publisher-grid {
+    grid-template-columns: 1fr;
+  }
+}
