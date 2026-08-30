@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.database import SessionLocal
+from app.models.channel import Channel
 from app.models.content import PublishJob
 from app.models.publishing import PublishPlan
 from app.services.worker import WorkerManager, worker_manager
@@ -104,6 +105,11 @@ class PublishScheduler:
         dispatched: list[str] = []
         errors: list[dict[str, str]] = []
         for job_id in due_job_ids:
+            validation_error = self._dispatch_validation_error(job_id)
+            if validation_error:
+                self._mark_dispatch_failure(job_id, validation_error)
+                errors.append({"job_id": job_id, "error": validation_error})
+                continue
             try:
                 self.worker.submit_publish_job(job_id)
                 dispatched.append(job_id)
@@ -113,8 +119,9 @@ class PublishScheduler:
                     self._mark_dispatch_failure(job_id, message)
                     errors.append({"job_id": job_id, "error": message})
             except Exception as exc:
-                # A scheduler/runtime infrastructure error must not silently turn
-                # a scheduled job into failed. Leave it scheduled for a later tick.
+                # Infrastructure errors remain scheduled so a later tick can retry
+                # without converting a temporary SQLite/runtime issue into a
+                # permanent publish failure.
                 errors.append({"job_id": job_id, "error": str(exc)})
 
         with self._lock:
@@ -161,6 +168,23 @@ class PublishScheduler:
             self._running = False
 
     @staticmethod
+    def _dispatch_validation_error(job_id: str) -> str | None:
+        """Apply current operational kill-switches without mutating snapshots."""
+        with SessionLocal() as db:
+            job = db.get(PublishJob, job_id)
+            if job is None:
+                return "Publish job not found."
+            if job.status != "scheduled":
+                return None
+            if job.channel_id:
+                channel = db.get(Channel, job.channel_id)
+                if channel is None:
+                    return "Publish Channel no longer exists."
+                if not channel.enabled:
+                    return "Publish Channel is disabled. Re-enable it before running this plan."
+            return None
+
+    @staticmethod
     def _mark_dispatch_failure(job_id: str, message: str) -> None:
         with SessionLocal() as db:
             job = db.get(PublishJob, job_id)
@@ -169,19 +193,41 @@ class PublishScheduler:
             job.status = "failed"
             job.stage = "dispatch_failed"
             job.error_message = message
+            db.flush()
             if job.plan_id:
-                plan = db.get(PublishPlan, job.plan_id)
-                if plan is not None:
-                    statuses = list(
-                        db.scalars(
-                            select(PublishJob.status).where(PublishJob.plan_id == job.plan_id)
-                        ).all()
-                    )
-                    if all(value == "failed" for value in statuses):
-                        plan.status = "failed"
-                    elif any(value == "failed" for value in statuses):
-                        plan.status = "partial"
+                PublishScheduler._refresh_plan_status(db, job.plan_id)
             db.commit()
+
+    @staticmethod
+    def _refresh_plan_status(db, plan_id: str) -> None:
+        plan = db.get(PublishPlan, plan_id)
+        if plan is None:
+            return
+        statuses = list(
+            db.scalars(select(PublishJob.status).where(PublishJob.plan_id == plan_id)).all()
+        )
+        if not statuses:
+            return
+        if any(value == "running" for value in statuses):
+            plan.status = "running"
+        elif any(value == "queued" for value in statuses):
+            plan.status = "queued"
+        elif any(value == "needs_review" for value in statuses):
+            plan.status = "needs_review"
+        elif any(value == "scheduled" for value in statuses):
+            plan.status = "scheduled"
+        elif all(value == "succeeded" for value in statuses):
+            plan.status = "succeeded"
+        elif any(value == "failed" for value in statuses) and any(
+            value == "succeeded" for value in statuses
+        ):
+            plan.status = "partial"
+        elif any(value == "failed" for value in statuses):
+            plan.status = "failed"
+        elif all(value == "cancelled" for value in statuses):
+            plan.status = "cancelled"
+        elif all(value == "draft" for value in statuses):
+            plan.status = "draft"
 
 
 publish_scheduler = PublishScheduler()
