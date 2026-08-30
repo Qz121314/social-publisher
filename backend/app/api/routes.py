@@ -15,6 +15,7 @@ from app.services.browser_sessions import BrowserSessionError, browser_sessions
 from app.services.ixbrowser import IXBrowserError, IXBrowserService
 from app.services.profile_locks import ProfileBusyError, profile_locks
 from app.services.profile_sync import sync_ix_profiles
+from app.services.scheduler import publish_scheduler
 from app.services.worker import worker_manager, worker_task_to_dict
 
 router = APIRouter()
@@ -34,6 +35,7 @@ def status() -> dict[str, object]:
         "ixbrowser": ix.connection_status(),
         "browser_sessions": len(browser_sessions.list_sessions()),
         "worker": worker_manager.stats(),
+        "scheduler": publish_scheduler.stats(),
     }
 
 
