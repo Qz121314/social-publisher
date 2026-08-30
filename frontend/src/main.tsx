@@ -9,6 +9,7 @@ import './admin-shell.css'
 import './facebook-flow-config.css'
 import './app/v1-shell.css'
 import './app/phase3.css'
+import './app/phase4.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

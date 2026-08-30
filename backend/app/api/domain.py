@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -23,7 +24,7 @@ from app.services.content_store import MediaValidationError, delete_media, media
 from app.services.platforms.base import PlatformContent, PlatformMedia, PlatformValidationError
 from app.services.platforms.registry import get_platform_adapter
 from app.services.publishing_domain import create_publish_plan, get_publish_plan
-from app.services.worker import worker_manager, worker_task_to_dict
+from app.services.scheduler import publish_scheduler, utcnow
 
 router = APIRouter(tags=["v1-domain"])
 
@@ -45,14 +46,27 @@ def domain_status(db: Session = Depends(get_db)) -> dict[str, object]:
         )
         or 0
     )
+    scheduled_jobs = int(
+        db.scalar(
+            select(func.count())
+            .select_from(PublishJob)
+            .where(PublishJob.plan_id.is_not(None), PublishJob.status == "scheduled")
+        )
+        or 0
+    )
     return {
-        "phase": 3,
+        "phase": 4,
         "channels": count(Channel),
         "flows": count(Flow),
         "flow_revisions": count(FlowRevision),
         "publish_plans": count(PublishPlan),
-        "publish_jobs": {"formal": formal_jobs, "legacy": legacy_jobs},
+        "publish_jobs": {
+            "formal": formal_jobs,
+            "legacy": legacy_jobs,
+            "scheduled": scheduled_jobs,
+        },
         "publish_attempts": count(PublishAttempt),
+        "scheduler": publish_scheduler.stats(),
         "compatibility_mode": True,
     }
 
@@ -199,7 +213,7 @@ def read_publish_plan(plan_id: str, db: Session = Depends(get_db)) -> PublishPla
 )
 def create_plan(payload: PublishPlanCreate, db: Session = Depends(get_db)) -> PublishPlan:
     try:
-        return create_publish_plan(
+        plan = create_publish_plan(
             db,
             content_id=payload.content_id,
             channel_ids=payload.channel_ids,
@@ -211,16 +225,20 @@ def create_plan(payload: PublishPlanCreate, db: Session = Depends(get_db)) -> Pu
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if plan.publish_mode != "draft":
+        publish_scheduler.wake()
+    return plan
 
 
-@router.post("/publish-plans/{plan_id}/run", status_code=status.HTTP_202_ACCEPTED)
-def run_publish_plan(plan_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+@router.post("/publish-plans/{plan_id}/run", response_model=PublishPlanRead)
+def run_publish_plan(plan_id: str, db: Session = Depends(get_db)) -> PublishPlan:
+    """Schedule safe remaining jobs for immediate pickup by the Scheduler."""
     try:
         plan = get_publish_plan(db, plan_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    runnable = [job.id for job in plan.jobs if job.status in {"draft", "scheduled", "failed"}]
+    runnable = [job for job in plan.jobs if job.status in {"draft", "scheduled", "failed"}]
     if not runnable:
         review_count = sum(1 for job in plan.jobs if job.status == "needs_review")
         detail = "No runnable jobs remain for this publish plan."
@@ -228,22 +246,46 @@ def run_publish_plan(plan_id: str, db: Session = Depends(get_db)) -> dict[str, o
             detail += f" {review_count} job(s) require manual review before retrying."
         raise HTTPException(status_code=409, detail=detail)
 
-    queued: list[dict[str, object]] = []
-    errors: list[dict[str, str]] = []
-    for job_id in runnable:
-        try:
-            queued.append(worker_task_to_dict(worker_manager.submit_publish_job(job_id)))
-        except ValueError as exc:
-            errors.append({"job_id": job_id, "error": str(exc)})
+    base_time = utcnow()
+    for index, job in enumerate(runnable):
+        job.status = "scheduled"
+        job.stage = None
+        job.scheduled_at = base_time + timedelta(seconds=index * plan.interval_seconds)
+        job.worker_task_id = None
+        job.error_message = None
+    plan.publish_mode = "immediate"
+    plan.status = "scheduled"
+    plan.scheduled_at = base_time
+    db.commit()
+    publish_scheduler.wake()
+    return get_publish_plan(db, plan_id)
 
-    if not queued:
-        raise HTTPException(status_code=409, detail="No publish jobs could be queued.")
-    return {
-        "plan_id": plan_id,
-        "queued": queued,
-        "queued_count": len(queued),
-        "errors": errors,
-    }
+
+@router.post("/publish-plans/{plan_id}/cancel", response_model=PublishPlanRead)
+def cancel_publish_plan(plan_id: str, db: Session = Depends(get_db)) -> PublishPlan:
+    try:
+        plan = get_publish_plan(db, plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    protected = [job for job in plan.jobs if job.status in {"queued", "running", "needs_review", "succeeded"}]
+    if protected:
+        raise HTTPException(
+            status_code=409,
+            detail="This plan already has queued, running, succeeded, or needs_review jobs and cannot be cancelled as a whole.",
+        )
+
+    cancellable = [job for job in plan.jobs if job.status in {"draft", "scheduled", "failed"}]
+    if not cancellable:
+        raise HTTPException(status_code=409, detail="No cancellable jobs remain for this publish plan.")
+    for job in cancellable:
+        job.status = "cancelled"
+        job.stage = "cancelled"
+        job.worker_task_id = None
+        job.error_message = None
+    plan.status = "cancelled"
+    db.commit()
+    return get_publish_plan(db, plan_id)
 
 
 @router.get("/domain/publish-jobs", response_model=list[DomainPublishJobRead])

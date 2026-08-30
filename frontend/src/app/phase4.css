@@ -1,0 +1,71 @@
+.v1-schedule-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid #e2e6ec;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.v1-schedule-box > strong {
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+
+.v1-schedule-box > label:not(.field-block) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #354052;
+  font-size: 12px;
+}
+
+.v1-schedule-box input[type='radio'] {
+  margin: 0;
+}
+
+.v1-scheduled-input {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e9ef;
+}
+
+.v1-scheduled-input small {
+  color: #7b8492;
+  font-size: 11px;
+}
+
+.v1-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.v1-scheduler-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid #f2c6c6;
+  border-radius: 6px;
+  background: #fff7f7;
+  color: #9b2c2c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.task-cancelled {
+  color: #687385;
+  background: #eef1f4;
+}
+
+.task-scheduled {
+  color: #4b5e77;
+  background: #edf3f8;
+}
+
+@media (max-width: 760px) {
+  .v1-plan-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

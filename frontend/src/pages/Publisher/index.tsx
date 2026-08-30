@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useState } from 'react'
 
-import { api } from '../../app/api'
+import { api, formatDateTime } from '../../app/api'
 import { PageHeader, PhaseBadge } from '../../app/page'
 
 type MediaAsset = {
@@ -27,8 +27,13 @@ type Channel = {
   health_status: string
 }
 
+type PublishMode = 'immediate' | 'scheduled' | 'draft'
+
 type PublishPlan = {
   id: string
+  publish_mode: PublishMode
+  status: string
+  scheduled_at?: string | null
   flow_revision_id: string
   jobs: Array<{ id: string; status: string }>
 }
@@ -47,6 +52,8 @@ export default function PublisherPage() {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [fileKey, setFileKey] = useState(0)
+  const [publishMode, setPublishMode] = useState<PublishMode>('immediate')
+  const [scheduledAt, setScheduledAt] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -93,6 +100,10 @@ export default function PublisherPage() {
       setMessage('请选择已有素材，或填写文案 / 添加媒体。')
       return
     }
+    if (publishMode === 'scheduled' && !scheduledAt) {
+      setMessage('请选择定时发布时间。')
+      return
+    }
 
     setBusy(true)
     setMessage(null)
@@ -104,20 +115,28 @@ export default function PublisherPage() {
         body: JSON.stringify({
           content_id: asset.id,
           channel_ids: selectedChannels,
-          publish_mode: 'immediate',
+          publish_mode: publishMode,
           timezone,
-          scheduled_at: null,
+          scheduled_at: publishMode === 'scheduled' ? scheduledAt : null,
           interval_seconds: 0,
           flow_revision_id: null,
         }),
       })
-      const result = await api<{ queued_count: number; errors: Array<{ job_id: string; error: string }> }>(`/api/publish-plans/${plan.id}/run`, { method: 'POST' })
-      setMessage(`发布计划 ${plan.id.slice(0, 8)} 已创建，${result.queued_count} 个正式 PublishJob 已进入 Worker。${result.errors.length ? ` ${result.errors.length} 个任务未能入队。` : ''}`)
+
+      if (publishMode === 'immediate') {
+        setMessage(`发布计划 ${plan.id.slice(0, 8)} 已进入 Scheduler，${plan.jobs.length} 个 PublishJob 将按 Worker 空闲槽位执行。`)
+      } else if (publishMode === 'scheduled') {
+        setMessage(`发布计划 ${plan.id.slice(0, 8)} 已保存到 SQLite，将于 ${formatDateTime(plan.scheduled_at)} 自动执行。`)
+      } else {
+        setMessage(`草稿计划 ${plan.id.slice(0, 8)} 已保存。`)
+      }
+
       setSelectedAssetId('')
       setSelectedChannels([])
       setText('')
       setFiles([])
       setFileKey((value) => value + 1)
+      setScheduledAt('')
       await load()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
@@ -126,17 +145,23 @@ export default function PublisherPage() {
     }
   }
 
+  const actionLabel = publishMode === 'immediate'
+    ? '创建并立即发布'
+    : publishMode === 'scheduled'
+      ? '创建定时发布'
+      : '保存草稿计划'
+
   return (
     <main className="v1-page">
       <PageHeader
         eyebrow="发布中心"
         title="创建发布"
-        description="正式链路：Asset → PublishPlan → Channel Snapshot → PublishJob → PublishAttempt → Facebook Worker。"
-        actions={<PhaseBadge>Phase 3</PhaseBadge>}
+        description="Asset → PublishPlan → SQLite Scheduler → PublishJob → PublishAttempt → Facebook Worker。"
+        actions={<PhaseBadge>Phase 4</PhaseBadge>}
       />
 
       {message && <div className="notice">{message}</div>}
-      <p className="v1-inline-note">Phase 3 先完成“立即发布”的正式模型迁移。定时发布与立即发布统一调度由 Phase 4 Scheduler 接管；发布间隔与分组批量选择在 Phase 5。</p>
+      <p className="v1-inline-note">立即发布和定时发布现在共用同一条 SQLite-backed Scheduler 流水线。Backend 重启后，未执行的 scheduled Job 会继续从数据库恢复。分组选择与发布间隔 UI 留到 Phase 5。</p>
 
       <form className="v1-publisher-grid" onSubmit={submit}>
         <section className="v1-panel v1-publisher-content">
@@ -185,13 +210,27 @@ export default function PublisherPage() {
             ))}
           </div>
 
+          <div className="v1-schedule-box">
+            <strong>3. 发布方式</strong>
+            <label><input type="radio" name="publish-mode" checked={publishMode === 'immediate'} onChange={() => setPublishMode('immediate')} /> 立即发布</label>
+            <label><input type="radio" name="publish-mode" checked={publishMode === 'scheduled'} onChange={() => setPublishMode('scheduled')} /> 定时发布</label>
+            <label><input type="radio" name="publish-mode" checked={publishMode === 'draft'} onChange={() => setPublishMode('draft')} /> 保存草稿</label>
+            {publishMode === 'scheduled' && (
+              <label className="field-block v1-scheduled-input">
+                <span>本地发布时间</span>
+                <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
+                <small>时区：{Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}</small>
+              </label>
+            )}
+          </div>
+
           <div className="v1-publish-summary">
-            <div><span>发布方式</span><strong>立即发布</strong></div>
+            <div><span>调度方式</span><strong>SQLite Scheduler</strong></div>
             <div><span>流程版本</span><strong>当前 Published Revision</strong></div>
             <div><span>任务模型</span><strong>每个 Channel 一个 Job</strong></div>
           </div>
 
-          <button className="primary v1-publish-submit" type="submit" disabled={busy || channels.length === 0}>{busy ? '正在创建任务…' : '创建并立即发布'}</button>
+          <button className="primary v1-publish-submit" type="submit" disabled={busy || channels.length === 0}>{busy ? '正在创建计划…' : actionLabel}</button>
         </section>
       </form>
     </main>
