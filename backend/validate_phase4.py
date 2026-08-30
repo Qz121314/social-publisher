@@ -13,6 +13,7 @@ from app.services.scheduler import PublishScheduler
 
 
 PROFILE_ID = 990004
+FUTURE_PROFILE_ID = 990005
 NOW = datetime.now(timezone.utc)
 
 
@@ -40,41 +41,57 @@ class FakeWorker:
 
 
 with SessionLocal() as db:
-    profile = db.get(BrowserProfile, PROFILE_ID)
-    if profile is None:
-        profile = BrowserProfile(
-            profile_id=PROFILE_ID,
-            name="CI Phase 4",
-            group_name="CI",
-            raw_json="{}",
-            is_available=True,
-        )
-        db.add(profile)
-        db.flush()
+    for profile_id, name in (
+        (PROFILE_ID, "CI Phase 4 Immediate"),
+        (FUTURE_PROFILE_ID, "CI Phase 4 Future"),
+    ):
+        profile = db.get(BrowserProfile, profile_id)
+        if profile is None:
+            db.add(
+                BrowserProfile(
+                    profile_id=profile_id,
+                    name=name,
+                    group_name="CI",
+                    raw_json="{}",
+                    is_available=True,
+                )
+            )
+    db.flush()
 
-    channel = Channel(
+    immediate_channel = Channel(
         profile_id=PROFILE_ID,
         platform="facebook",
-        target_id="phase4-ci-target",
-        target_name="Phase 4 CI Target",
+        target_id="phase4-ci-target-immediate",
+        target_name="Phase 4 CI Immediate",
         target_type="page",
-        target_url="https://www.facebook.com/phase4-ci-target",
+        target_url="https://www.facebook.com/phase4-ci-target-immediate",
         enabled=True,
         health_status="healthy",
     )
-    db.add(channel)
+    future_channel = Channel(
+        profile_id=FUTURE_PROFILE_ID,
+        platform="facebook",
+        target_id="phase4-ci-target-future",
+        target_name="Phase 4 CI Future",
+        target_type="page",
+        target_url="https://www.facebook.com/phase4-ci-target-future",
+        enabled=True,
+        health_status="healthy",
+    )
+    db.add_all([immediate_channel, future_channel])
     immediate_content = ContentItem(platform="facebook", text="Phase 4 immediate", status="draft")
     future_content = ContentItem(platform="facebook", text="Phase 4 scheduled", status="draft")
     db.add_all([immediate_content, future_content])
     db.commit()
-    db.refresh(channel)
+    db.refresh(immediate_channel)
+    db.refresh(future_channel)
     db.refresh(immediate_content)
     db.refresh(future_content)
 
     immediate_plan = create_publish_plan(
         db,
         content_id=immediate_content.id,
-        channel_ids=[channel.id],
+        channel_ids=[immediate_channel.id],
         publish_mode="immediate",
         timezone_name="UTC",
         scheduled_at=None,
@@ -85,7 +102,7 @@ with SessionLocal() as db:
     future_plan = create_publish_plan(
         db,
         content_id=future_content.id,
-        channel_ids=[channel.id],
+        channel_ids=[future_channel.id],
         publish_mode="scheduled",
         timezone_name="UTC",
         scheduled_at=future_time,
@@ -112,9 +129,11 @@ second = scheduler.run_once(now=future_time + timedelta(seconds=1))
 assert future_job_id in fake.submitted
 assert second["dispatched"] >= 1
 
-# Simulate a backend restart after a job was queued but before it ran. Runtime
+# Simulate a backend restart after jobs were queued but before they ran. Runtime
 # recovery must return formal queued jobs to SQLite scheduled state so a new
-# scheduler process can discover them again.
+# scheduler process can discover them again. The two jobs intentionally use
+# different profiles because Phase 4 tests persistence/recovery, while Phase 5
+# separately tests same-profile serialization.
 from app.services.worker import worker_manager
 worker_manager.recover_runtime_state()
 

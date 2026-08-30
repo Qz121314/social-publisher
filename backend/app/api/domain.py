@@ -55,7 +55,7 @@ def domain_status(db: Session = Depends(get_db)) -> dict[str, object]:
         or 0
     )
     return {
-        "phase": 4,
+        "phase": 5,
         "channels": count(Channel),
         "flows": count(Flow),
         "flow_revisions": count(FlowRevision),

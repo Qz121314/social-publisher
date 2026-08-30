@@ -4,6 +4,7 @@ from fastapi import FastAPI, Response
 
 from app.api.routes import router
 from app.database import init_db
+from app.services.browser_sessions import browser_sessions
 from app.services.scheduler import publish_scheduler
 from app.services.worker import worker_manager
 
@@ -15,12 +16,21 @@ async def lifespan(_: FastAPI):
     publish_scheduler.start()
     yield
     publish_scheduler.shutdown(wait=True)
+    # Warm sessions are idle by definition. Close only those Worker-managed idle
+    # sessions on backend shutdown so iX windows are not orphaned after the
+    # process exits. Active workers keep the existing conservative recovery path.
+    for session in browser_sessions.list_sessions():
+        if session.get("managed_by_worker") and session.get("warm_until"):
+            try:
+                browser_sessions.close(int(session["profile_id"]), force=True)
+            except Exception:
+                pass
     worker_manager.shutdown(wait=False)
 
 
 app = FastAPI(
     title="Social Publisher",
-    version="0.9.0",
+    version="0.10.0",
     description="Local V1 social publishing control plane.",
     lifespan=lifespan,
 )

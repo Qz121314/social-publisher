@@ -72,7 +72,7 @@ export default function PlansPage() {
     setMessage(null)
     try {
       await api<PublishPlan>(`/api/publish-plans/${planId}/run`, { method: 'POST' })
-      setMessage(`计划 ${planId.slice(0, 8)} 已改为立即执行，Scheduler 将按 Worker 空闲槽位接管。`)
+      setMessage(`计划 ${planId.slice(0, 8)} 已改为立即执行，Scheduler 会保留原发布间隔并按 Profile 安全派发。`)
       await load()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
@@ -100,12 +100,12 @@ export default function PlansPage() {
       <PageHeader
         eyebrow="计划中心"
         title="发布计划"
-        description="SQLite 是计划真相来源；Scheduler 只负责发现到期 Job 并安全派发。"
-        actions={<PhaseBadge>Phase 4</PhaseBadge>}
+        description="SQLite 保存每个 Channel 的独立执行时间；Scheduler 按时间、Profile 锁和 Worker 容量安全派发。"
+        actions={<PhaseBadge>Phase 5</PhaseBadge>}
       />
 
       {message && <div className="notice">{message}</div>}
-      <p className="v1-inline-note">Backend 重启不会丢失 future schedule。queued Job 会在启动恢复时退回 scheduled，running Job 则保守进入 needs_review，避免重复发布。</p>
+      <p className="v1-inline-note">批量计划会把发布间隔固化为每个 PublishJob 的 scheduled_at。同一 iX Profile 强制串行，不同 Profile 仍可并发；Backend 重启后继续以 SQLite 为准恢复。</p>
 
       <section className="v1-panel">
         <div className="v1-toolbar">
@@ -119,18 +119,20 @@ export default function PlansPage() {
 
         <div className="table-wrap">
           <table>
-            <thead><tr><th>计划 / 素材</th><th>方式</th><th>计划时间</th><th>Jobs</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th>计划 / 素材</th><th>方式</th><th>计划时间</th><th>间隔</th><th>Jobs</th><th>状态</th><th>操作</th></tr></thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={6}><div className="empty-state compact-empty"><strong>暂无匹配计划</strong><span>在发布中心创建立即发布或定时发布后会显示在这里。</span></div></td></tr>
+                <tr><td colSpan={7}><div className="empty-state compact-empty"><strong>暂无匹配计划</strong><span>在发布中心创建立即发布、定时发布或批量计划后会显示在这里。</span></div></td></tr>
               ) : filtered.map((plan) => {
                 const canRun = plan.jobs.some((job) => ['draft', 'scheduled', 'failed'].includes(job.status))
                 const canCancel = plan.jobs.length > 0 && plan.jobs.every((job) => ['draft', 'scheduled', 'failed'].includes(job.status))
+                const batchSpan = Math.max(0, plan.jobs.length - 1) * plan.interval_seconds
                 return (
                   <tr key={plan.id}>
                     <td><strong>{assetLabel(plan)}</strong><br /><small>#{plan.id.slice(0, 8)}</small></td>
                     <td>{plan.publish_mode === 'scheduled' ? '定时发布' : plan.publish_mode === 'immediate' ? '立即发布' : '草稿'}</td>
                     <td>{formatDateTime(plan.scheduled_at)}<br /><small>{plan.timezone}</small></td>
+                    <td><strong>{plan.interval_seconds}s</strong><br /><small>跨度 {batchSpan}s</small></td>
                     <td><strong>{plan.jobs.length}</strong><br /><small>{jobSummary(plan) || '—'}</small></td>
                     <td><span className={`task-status task-${plan.status}`}>{plan.status}</span></td>
                     <td>
