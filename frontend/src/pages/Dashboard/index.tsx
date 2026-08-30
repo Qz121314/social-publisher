@@ -89,8 +89,8 @@ export default function DashboardPage() {
       <PageHeader
         eyebrow="总览"
         title="系统运行总览"
-        description="聚合 PublishPlan / PublishJob、批量调度和 Browser Warm Session 运行状态。"
-        actions={<PhaseBadge>Phase 5</PhaseBadge>}
+        description="聚合 PublishPlan / PublishJob、批量调度、任务 Timeline 与 Facebook 组合式执行状态。"
+        actions={<PhaseBadge>Phase 7</PhaseBadge>}
       />
 
       {error && <div className="notice">{error}</div>}
@@ -111,7 +111,7 @@ export default function DashboardPage() {
             <div className="v1-health-row"><div><strong>Worker Pool</strong><br /><small>最大并发 {status?.worker?.max_workers ?? '—'} · 同 Profile 强制串行</small></div><span className={`v1-health-state ${status?.worker ? '' : 'off'}`}>{status?.worker ? `${status.worker.active_tasks} 运行中` : '未知'}</span></div>
             <div className="v1-health-row"><div><strong>Scheduler</strong><br /><small>{status?.scheduler ? `${status.scheduler.poll_interval_seconds}s 轮询 · 已派发 ${status.scheduler.dispatched_total} · 忙碌延后 ${status.scheduler.deferred_busy_profiles_total ?? 0}` : 'SQLite-backed scheduler'}</small></div><span className={`v1-health-state ${status?.scheduler?.running ? '' : 'off'}`}>{status?.scheduler?.running ? '正常' : '未运行'}</span></div>
             <div className="v1-health-row"><div><strong>Browser Warm Pool</strong><br /><small>TTL {status?.browser_pool?.warm_session_ttl_seconds ?? '—'}s · 当前 {status?.browser_pool?.warm_sessions ?? 0} 个热会话</small></div><span className={`v1-health-state ${status?.browser_pool ? '' : 'off'}`}>{status?.browser_pool ? `${status.browser_pool.total_sessions} Sessions` : '未知'}</span></div>
-            <div className="v1-health-row"><div><strong>Facebook Flow</strong><br /><small>Snapshot-bound Flow Revision</small></div><span className="v1-health-state">已接入</span></div>
+            <div className="v1-health-row"><div><strong>Facebook Adapter</strong><br /><small>Composite · Snapshot-bound Flow Revision</small></div><span className="v1-health-state">已组合化</span></div>
           </div>
         </section>
 
@@ -122,7 +122,9 @@ export default function DashboardPage() {
             <div className="v1-flow-row"><strong>02</strong><div><strong>领域模型</strong><br /><small>Channel / PublishPlan / Attempt / Flow Revision</small></div><span className="v1-health-state">完成</span></div>
             <div className="v1-flow-row"><strong>03</strong><div><strong>迁移 Facebook PoC</strong><br /><small>正式模型连接 Facebook Worker</small></div><span className="v1-health-state">完成</span></div>
             <div className="v1-flow-row"><strong>04</strong><div><strong>Scheduler</strong><br /><small>立即 / 定时统一 SQLite 流水线</small></div><span className="v1-health-state">完成</span></div>
-            <div className="v1-flow-row"><strong>05</strong><div><strong>批量发布</strong><br /><small>分组 / 间隔 / Profile 串行 / Warm Session TTL</small></div><span className="v1-health-state">当前</span></div>
+            <div className="v1-flow-row"><strong>05</strong><div><strong>批量发布</strong><br /><small>分组 / 间隔 / Profile 串行 / Warm Session TTL</small></div><span className="v1-health-state">完成</span></div>
+            <div className="v1-flow-row"><strong>06</strong><div><strong>任务可观测性</strong><br /><small>Timeline / 性能拆分 / needs_review 人工确认</small></div><span className="v1-health-state">完成</span></div>
+            <div className="v1-flow-row"><strong>07</strong><div><strong>Facebook Adapter 收口</strong><br /><small>Identity / Composer / Media / Submit 等组合式组件</small></div><span className="v1-health-state">当前</span></div>
           </div>
           {status?.scheduler?.last_error && <div className="v1-scheduler-error">Scheduler 最近错误：{status.scheduler.last_error}</div>}
         </section>
