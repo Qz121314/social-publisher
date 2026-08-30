@@ -70,6 +70,14 @@ def _merge_review_result(
     return json.dumps(value, ensure_ascii=False)
 
 
+def _platform_name(job: PublishJob) -> str:
+    if job.platform == "facebook":
+        return "Facebook"
+    if job.platform == "instagram":
+        return "Instagram"
+    return job.platform or "平台"
+
+
 @router.get("/publish-jobs", response_model=list[DomainPublishJobRead])
 def list_task_jobs(
     job_status: str | None = Query(default=None, alias="status"),
@@ -126,11 +134,12 @@ def run_task_job(job_id: str, db: Session = Depends(get_db)) -> PublishJob:
     response_model=DomainPublishJobRead,
 )
 def confirm_job_published(job_id: str, db: Session = Depends(get_db)) -> PublishJob:
-    """Resolve an uncertain submission after the user verifies Facebook manually."""
+    """Resolve an uncertain submission after the user verifies the platform manually."""
 
     job = _get_job(db, job_id)
     attempt = _review_attempt(job)
     now = utcnow()
+    platform_name = _platform_name(job)
 
     attempt.status = "succeeded"
     attempt.stage = "manual_confirmed_published"
@@ -153,8 +162,8 @@ def confirm_job_published(job_id: str, db: Session = Depends(get_db)) -> Publish
     record_attempt_event(
         attempt_id,
         "manual_confirmed_published",
-        "人工确认：Facebook 已成功发布，本任务按成功收口",
-        {"decision": "confirmed_published"},
+        f"人工确认：{platform_name} 已成功发布，本任务按成功收口",
+        {"decision": "confirmed_published", "platform": job.platform},
         update_stage=False,
     )
     return _get_job(db, job_id)
@@ -173,10 +182,11 @@ def confirm_not_published_and_retry(
     job = _get_job(db, job_id)
     attempt = _review_attempt(job)
     now = utcnow()
+    platform_name = _platform_name(job)
 
     attempt.status = "failed"
     attempt.stage = "manual_confirmed_not_published"
-    attempt.error_message = "人工确认 Facebook 未发布，可安全创建下一次执行。"
+    attempt.error_message = f"人工确认 {platform_name} 未发布，可安全创建下一次执行。"
     attempt.finished_at = attempt.finished_at or now
     attempt.result_json = _merge_review_result(
         attempt.result_json,
@@ -197,8 +207,8 @@ def confirm_not_published_and_retry(
     record_attempt_event(
         attempt_id,
         "manual_confirmed_not_published",
-        "人工确认：Facebook 未发布，已允许创建新的安全重试 Attempt",
-        {"decision": "confirmed_not_published_retry"},
+        f"人工确认：{platform_name} 未发布，已允许创建新的安全重试 Attempt",
+        {"decision": "confirmed_not_published_retry", "platform": job.platform},
         update_stage=False,
     )
     publish_scheduler.wake()
