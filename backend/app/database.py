@@ -43,6 +43,7 @@ def init_db() -> None:
     # full relationship graph and create newly introduced lightweight tables.
     from app.models import account, channel, content, execution, flow, publish_target, publishing, settings  # noqa: F401
     from app.services.domain_bootstrap import bootstrap_phase2_records, ensure_phase2_schema
+    from app.services.platform_bootstrap import bootstrap_phase8_records
 
     Base.metadata.create_all(bind=engine)
     rebuilt_publish_jobs = ensure_phase2_schema(engine)
@@ -50,3 +51,4 @@ def init_db() -> None:
         Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         bootstrap_phase2_records(db)
+        bootstrap_phase8_records(db)
