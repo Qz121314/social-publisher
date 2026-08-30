@@ -19,9 +19,13 @@ class PublishJobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    profile_id: int
+    profile_id: int | None
+    plan_id: str | None
+    channel_id: str | None
+    flow_revision_id: str | None
     platform: str
     status: str
+    stage: str | None
     scheduled_at: datetime | None
     worker_task_id: str | None
     published_url: str | None

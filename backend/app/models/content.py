@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,11 +34,14 @@ class ContentItem(Base):
         cascade="all, delete-orphan",
         order_by="MediaAsset.sort_order",
     )
+    # Compatibility relation for the existing PoC path. Formal V1 PublishPlan jobs
+    # use plan_id/channel_id snapshots and intentionally leave content_id NULL.
     jobs: Mapped[list["PublishJob"]] = relationship(
         back_populates="content",
         cascade="all, delete-orphan",
         order_by="PublishJob.created_at",
     )
+    plans: Mapped[list["PublishPlan"]] = relationship(back_populates="content")
 
 
 class MediaAsset(Base):
@@ -65,25 +68,39 @@ class MediaAsset(Base):
 
 class PublishJob(Base):
     __tablename__ = "publish_jobs"
-    __table_args__ = (
-        UniqueConstraint("content_id", "profile_id", name="uq_publish_job_content_profile"),
-    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid4())
     )
-    content_id: Mapped[str] = mapped_column(
-        ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True
+
+    # Formal V1 ownership. A job belongs to one immutable plan/channel snapshot.
+    plan_id: Mapped[str | None] = mapped_column(
+        ForeignKey("publish_plans.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    profile_id: Mapped[int] = mapped_column(
+    channel_id: Mapped[str | None] = mapped_column(
+        ForeignKey("channels.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    flow_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("flow_revisions.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    content_snapshot_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    channel_snapshot_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+
+    # Legacy compatibility fields retained until the PoC worker is migrated in
+    # Phase 3. Formal plan jobs intentionally leave content_id/profile_id NULL.
+    content_id: Mapped[str | None] = mapped_column(
+        ForeignKey("contents.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("browser_profiles.profile_id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     platform: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     status: Mapped[str] = mapped_column(
         String(30), default="draft", nullable=False, index=True
     )
+    stage: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -97,4 +114,12 @@ class PublishJob(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    content: Mapped[ContentItem] = relationship(back_populates="jobs")
+    content: Mapped[ContentItem | None] = relationship(back_populates="jobs")
+    plan: Mapped["PublishPlan | None"] = relationship(back_populates="jobs")
+    channel: Mapped["Channel | None"] = relationship(back_populates="jobs")
+    flow_revision: Mapped["FlowRevision | None"] = relationship(back_populates="jobs")
+    attempts: Mapped[list["PublishAttempt"]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="PublishAttempt.attempt_no",
+    )
