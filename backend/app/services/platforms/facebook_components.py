@@ -120,10 +120,17 @@ class FacebookDiagnosticsComponent:
         driver: Chrome,
         content: PlatformContent | None = None,
     ) -> dict[str, Any]:
+        # Actor diagnostics are informative after a successful verification and
+        # must never turn a confirmed post into needs_review by introducing a new
+        # failure point. URL/title retain the same semantics as the verified flow.
+        try:
+            actor_id = self._primitives.current_actor_id(driver)
+        except Exception:
+            actor_id = None
         return {
             "current_url": driver.current_url,
             "title": driver.title,
-            "current_actor_id": self._primitives.current_actor_id(driver),
+            "current_actor_id": actor_id,
             "target_id": content.target_id if content else None,
             "target_name": content.target_name if content else None,
         }
