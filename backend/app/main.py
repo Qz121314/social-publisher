@@ -33,8 +33,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Social Publisher",
-    version="0.13.0",
-    description="Local V1 multi-platform social publishing control plane.",
+    version="0.14.0-rc1",
+    description="Facebook V1 release candidate; Instagram Phase 8A remains experimental.",
     lifespan=lifespan,
 )
 

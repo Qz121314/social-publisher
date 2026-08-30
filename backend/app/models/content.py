@@ -34,8 +34,10 @@ class ContentItem(Base):
         cascade="all, delete-orphan",
         order_by="MediaAsset.sort_order",
     )
-    # Compatibility relation for the existing PoC path. Formal V1 PublishPlan jobs
-    # use plan_id/channel_id snapshots and intentionally leave content_id NULL.
+    # Compatibility relation for the legacy direct execution path. Formal V1
+    # PublishPlan jobs use plan_id/channel_id snapshots and intentionally leave
+    # content_id NULL; new publishing code must not treat this relation as the
+    # product-level task source of truth.
     jobs: Mapped[list["PublishJob"]] = relationship(
         back_populates="content",
         cascade="all, delete-orphan",
@@ -86,8 +88,10 @@ class PublishJob(Base):
     content_snapshot_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     channel_snapshot_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
 
-    # Legacy compatibility fields retained until the PoC worker is migrated in
-    # Phase 3. Formal plan jobs intentionally leave content_id/profile_id NULL.
+    # Legacy compatibility fields for the old direct /contents/{id}/run bridge.
+    # Formal Plan jobs intentionally leave content_id/profile_id NULL. Keep them
+    # only until the compatibility API itself is retired; never use them for new
+    # V1 scheduling or product-level task identity.
     content_id: Mapped[str | None] = mapped_column(
         ForeignKey("contents.id", ondelete="CASCADE"), nullable=True, index=True
     )
