@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from app.services.platforms.base import PlatformAdapter, PlatformValidationError
-from app.services.platforms.facebook_unicode_flow import UnicodeFacebookFlowAdapter
+from app.services.platforms.facebook_timeline import TimelineFacebookFlowAdapter
 
 _ADAPTERS: dict[str, PlatformAdapter] = {
-    "facebook": UnicodeFacebookFlowAdapter(),
+    "facebook": TimelineFacebookFlowAdapter(),
 }
 
 
