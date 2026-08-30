@@ -8,6 +8,7 @@ from app.api.contents import router as contents_router
 from app.api.domain import router as domain_router
 from app.api.facebook_flow_config import router as facebook_flow_config_router
 from app.api.facebook_probe import router as facebook_probe_router
+from app.api.instagram_channels import router as instagram_channels_router
 from app.api.publish_targets import router as publish_targets_router
 from app.database import get_db
 from app.models.account import BrowserProfile
@@ -31,6 +32,7 @@ router.include_router(domain_router)
 router.include_router(publish_targets_router)
 router.include_router(facebook_probe_router)
 router.include_router(facebook_flow_config_router)
+router.include_router(instagram_channels_router)
 
 
 class RuntimeSettingsUpdate(BaseModel):

@@ -17,6 +17,13 @@ type Asset = {
   created_at: string
 }
 
+type PlatformInfo = {
+  name: string
+  display_name: string
+  supports_text: boolean
+  media_types: string[]
+}
+
 type Channel = {
   id: string
   profile_id: number
@@ -59,7 +66,21 @@ function shortText(value: string, length = 56) {
   return normalized.length > length ? `${normalized.slice(0, length)}…` : normalized
 }
 
+function platformDisplay(platform: string) {
+  if (platform === 'facebook') return 'Facebook'
+  if (platform === 'instagram') return 'Instagram'
+  return platform
+}
+
+function channelTypeLabel(channel: Channel) {
+  if (channel.platform === 'facebook') return channel.target_type === 'page' ? '公共主页' : '个人主页'
+  if (channel.platform === 'instagram') return 'Feed 账号'
+  return channel.target_type
+}
+
 export default function PublisherPage() {
+  const [platforms, setPlatforms] = useState<PlatformInfo[]>([])
+  const [platform, setPlatform] = useState('facebook')
   const [assets, setAssets] = useState<Asset[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
@@ -74,24 +95,45 @@ export default function PublisherPage() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
-  const load = async () => {
-    const [assetItems, channelItems, profileItems] = await Promise.all([
-      api<Asset[]>('/api/assets?limit=30'),
-      api<Channel[]>('/api/channels?platform=facebook&enabled=true'),
+  const loadStatic = async () => {
+    const [platformResult, assetItems, profileItems] = await Promise.all([
+      api<{ items: PlatformInfo[] }>('/api/platforms'),
+      api<Asset[]>('/api/assets?limit=100'),
       api<BrowserProfile[]>('/api/browser-profiles'),
     ])
+    setPlatforms(platformResult.items)
     setAssets(assetItems)
-    setChannels(channelItems)
     setProfiles(profileItems)
+    if (!platformResult.items.some((item) => item.name === platform)) {
+      setPlatform(platformResult.items[0]?.name || 'facebook')
+    }
+  }
+
+  const loadChannels = async (selectedPlatform: string) => {
+    const items = await api<Channel[]>(`/api/channels?platform=${encodeURIComponent(selectedPlatform)}&enabled=true`)
+    setChannels(items)
   }
 
   useEffect(() => {
-    load().catch((error) => setMessage(error instanceof Error ? error.message : String(error)))
+    loadStatic().catch((error) => setMessage(error instanceof Error ? error.message : String(error)))
   }, [])
 
+  useEffect(() => {
+    setSelectedAssetId('')
+    setSelectedChannels([])
+    setText('')
+    setFiles([])
+    setFileKey((value) => value + 1)
+    loadChannels(platform).catch((error) => setMessage(error instanceof Error ? error.message : String(error)))
+  }, [platform])
+
+  const platformAssets = useMemo(
+    () => assets.filter((item) => item.platform === platform),
+    [assets, platform],
+  )
   const selectedAsset = useMemo(
-    () => assets.find((item) => item.id === selectedAssetId),
-    [assets, selectedAssetId],
+    () => platformAssets.find((item) => item.id === selectedAssetId),
+    [platformAssets, selectedAssetId],
   )
   const selectedSet = useMemo(() => new Set(selectedChannels), [selectedChannels])
   const profileById = useMemo(
@@ -162,7 +204,7 @@ export default function PublisherPage() {
 
   const createTemporaryAsset = async () => {
     const form = new FormData()
-    form.append('platform', 'facebook')
+    form.append('platform', platform)
     form.append('text', text)
     files.forEach((file) => form.append('files', file))
     return api<Asset>('/api/assets/upload', { method: 'POST', body: form })
@@ -171,11 +213,19 @@ export default function PublisherPage() {
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (selectedChannels.length === 0) {
-      setMessage('请至少选择一个 Facebook Channel。')
+      setMessage(`请至少选择一个 ${platformDisplay(platform)} Channel。`)
       return
     }
     if (!selectedAsset && !text.trim() && files.length === 0) {
       setMessage('请选择已有素材，或填写文案 / 添加媒体。')
+      return
+    }
+    if (platform === 'instagram' && !selectedAsset && files.length === 0) {
+      setMessage('Instagram Feed Post 至少需要 1 个图片或视频。')
+      return
+    }
+    if (selectedAsset && platform === 'instagram' && selectedAsset.media.length === 0) {
+      setMessage('这个 Instagram 素材没有媒体，Feed Post 无法发布。')
       return
     }
     if (publishMode === 'scheduled' && !scheduledAt) {
@@ -207,11 +257,11 @@ export default function PublisherPage() {
 
       const batchText = `${plan.jobs.length} 个 PublishJob，间隔 ${plan.interval_seconds} 秒`
       if (publishMode === 'immediate') {
-        setMessage(`发布计划 ${plan.id.slice(0, 8)} 已进入 Scheduler：${batchText}。不同 iX 环境可并发，同一环境会强制串行。`)
+        setMessage(`${platformDisplay(platform)} 发布计划 ${plan.id.slice(0, 8)} 已进入 Scheduler：${batchText}。同一 iX 环境仍强制串行。`)
       } else if (publishMode === 'scheduled') {
-        setMessage(`发布计划 ${plan.id.slice(0, 8)} 已保存到 SQLite，将从 ${formatDateTime(plan.scheduled_at)} 开始按 ${plan.interval_seconds} 秒间隔执行 ${plan.jobs.length} 个任务。`)
+        setMessage(`${platformDisplay(platform)} 发布计划 ${plan.id.slice(0, 8)} 已保存到 SQLite，将从 ${formatDateTime(plan.scheduled_at)} 开始执行 ${plan.jobs.length} 个任务。`)
       } else {
-        setMessage(`草稿计划 ${plan.id.slice(0, 8)} 已保存：${batchText}。`)
+        setMessage(`${platformDisplay(platform)} 草稿计划 ${plan.id.slice(0, 8)} 已保存：${batchText}。`)
       }
 
       setSelectedAssetId('')
@@ -220,7 +270,8 @@ export default function PublisherPage() {
       setFiles([])
       setFileKey((value) => value + 1)
       setScheduledAt('')
-      await load()
+      await loadStatic()
+      await loadChannels(platform)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -229,9 +280,9 @@ export default function PublisherPage() {
   }
 
   const actionLabel = publishMode === 'immediate'
-    ? '创建并立即发布'
+    ? `创建并立即发布到 ${platformDisplay(platform)}`
     : publishMode === 'scheduled'
-      ? '创建定时发布'
+      ? `创建 ${platformDisplay(platform)} 定时发布`
       : '保存草稿计划'
 
   const estimatedSpan = Math.max(0, selectedChannels.length - 1) * intervalSeconds
@@ -240,23 +291,39 @@ export default function PublisherPage() {
     <main className="v1-page">
       <PageHeader
         eyebrow="发布中心"
-        title="创建批量发布"
-        description="分组选择 Channel，按固定间隔生成独立 PublishJob，并由 Scheduler / Worker 安全执行。"
-        actions={<PhaseBadge>Phase 5</PhaseBadge>}
+        title="创建多平台批量发布"
+        description="同一套 Asset → PublishPlan → PublishJob → Scheduler 流水线现在支持 Facebook 与 Instagram。"
+        actions={<PhaseBadge>Phase 8</PhaseBadge>}
       />
 
       {message && <div className="notice">{message}</div>}
-      <p className="v1-inline-note">批量发布现在直接复用 iXBrowser 的分组。不同 iX 环境可占用不同 Worker 并发执行；同一个 iX Profile 即使存在多个任务，也只会串行派发。随机间隔、每日上限、账号优先级仍属于 V2 策略中心。</p>
+
+      <section className="v1-panel">
+        <div className="v1-panel-heading"><div><h2>发布平台</h2><p>一个 PublishPlan 仍只绑定一个平台，避免跨平台 Flow 和验证语义混在同一批任务中。</p></div></div>
+        <div className="filter-row">
+          {platforms.map((item) => (
+            <button
+              key={item.name}
+              type="button"
+              className={`compact-button ${platform === item.name ? 'worker-button' : ''}`}
+              onClick={() => setPlatform(item.name)}
+            >
+              {item.display_name}
+            </button>
+          ))}
+        </div>
+        {platform === 'instagram' && <p className="v1-inline-note">Instagram Phase 8A 当前支持 Feed 图片 / 视频 / 多媒体 Post。至少需要 1 个媒体；Story、音乐、协作者等不在本阶段。</p>}
+      </section>
 
       <form className="v1-publisher-grid" onSubmit={submit}>
         <section className="v1-panel v1-publisher-content">
-          <div className="v1-panel-heading"><div><h2>1. 内容 / 素材</h2><p>选择素材中心已有内容，或临时创建一个新 Asset。</p></div></div>
+          <div className="v1-panel-heading"><div><h2>1. 内容 / 素材</h2><p>只显示与当前平台匹配的 Asset，也可以临时创建新素材。</p></div></div>
 
           <label className="field-block">
             <span>已有素材</span>
             <select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)}>
               <option value="">临时创建新素材</option>
-              {assets.map((asset) => <option key={asset.id} value={asset.id}>{shortText(asset.text)} · {asset.media.length} 个媒体</option>)}
+              {platformAssets.map((asset) => <option key={asset.id} value={asset.id}>{shortText(asset.text)} · {asset.media.length} 个媒体</option>)}
             </select>
           </label>
 
@@ -264,16 +331,16 @@ export default function PublisherPage() {
             <div className="v1-asset-preview">
               <strong>{shortText(selectedAsset.text, 120)}</strong>
               <span>{selectedAsset.media.length > 0 ? selectedAsset.media.map((item) => item.original_name).join(' · ') : '无媒体'}</span>
-              <small>Asset #{selectedAsset.id.slice(0, 8)}</small>
+              <small>{platformDisplay(selectedAsset.platform)} Asset #{selectedAsset.id.slice(0, 8)}</small>
             </div>
           ) : (
             <>
               <label className="field-block">
-                <span>帖子文案</span>
-                <textarea value={text} onChange={(event) => setText(event.target.value)} rows={9} placeholder="输入 Facebook 帖子正文…" />
+                <span>{platform === 'instagram' ? 'Caption' : '帖子文案'}</span>
+                <textarea value={text} onChange={(event) => setText(event.target.value)} rows={9} placeholder={`输入 ${platformDisplay(platform)} ${platform === 'instagram' ? 'Caption' : '帖子正文'}…`} />
               </label>
               <label className="field-block">
-                <span>图片 / 视频</span>
+                <span>图片 / 视频{platform === 'instagram' ? '（必需）' : ''}</span>
                 <input key={fileKey} type="file" multiple accept="image/*,video/*" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
               </label>
               {files.length > 0 && <div className="v1-file-summary">已选择 {files.length} 个文件：{files.map((file) => file.name).join(' · ')}</div>}
@@ -283,7 +350,7 @@ export default function PublisherPage() {
 
         <section className="v1-panel v1-publisher-targets">
           <div className="v1-panel-heading">
-            <div><h2>2. 发布目标</h2><p>按 iX 分组整组选择，也可以逐个 Channel 调整。</p></div>
+            <div><h2>2. 发布目标</h2><p>按 iX 分组整组选择当前平台 Channel，也可以逐个调整。</p></div>
             <span className="v1-muted">{selectedChannels.length} Channels / {selectedProfileCount} iX</span>
           </div>
 
@@ -291,12 +358,12 @@ export default function PublisherPage() {
             <button type="button" className="compact-button" onClick={toggleAll} disabled={channels.length === 0}>
               {channels.length > 0 && channels.every((channel) => selectedSet.has(channel.id)) ? '取消全选' : '全选全部'}
             </button>
-            <span className="v1-muted">执行顺序按当前分组 / iX 列表顺序冻结到 PublishPlan。</span>
+            <span className="v1-muted">当前平台：{platformDisplay(platform)} · 执行顺序会冻结到 PublishPlan。</span>
           </div>
 
           <div className="v1-group-picker">
             {channels.length === 0 ? (
-              <div className="empty-state compact-empty"><strong>暂无可发布 Channel</strong><span>先到 iX账号中心扫描并选择 Facebook 发布主页。</span></div>
+              <div className="empty-state compact-empty"><strong>暂无可发布 Channel</strong><span>先到 iX账号中心配置 {platformDisplay(platform)} Channel。</span></div>
             ) : groups.map((group) => {
               const selectedCount = group.channels.filter((channel) => selectedSet.has(channel.id)).length
               const allSelected = selectedCount === group.channels.length && group.channels.length > 0
@@ -313,8 +380,8 @@ export default function PublisherPage() {
                         <label className={`v1-channel-option ${selectedSet.has(channel.id) ? 'selected' : ''}`} key={channel.id}>
                           <input type="checkbox" checked={selectedSet.has(channel.id)} onChange={() => toggleChannel(channel.id)} />
                           <span>
-                            <strong>{channel.target_name}</strong>
-                            <small>iX #{channel.profile_id} {profile?.name ? `· ${profile.name}` : ''} · {channel.target_type === 'page' ? '公共主页' : '个人主页'} · {channel.health_status}</small>
+                            <strong>{channel.platform === 'instagram' ? `@${channel.target_name}` : channel.target_name}</strong>
+                            <small>iX #{channel.profile_id} {profile?.name ? `· ${profile.name}` : ''} · {channelTypeLabel(channel)} · {channel.health_status}</small>
                           </span>
                         </label>
                       )
@@ -350,22 +417,15 @@ export default function PublisherPage() {
                 value={intervalSeconds}
                 onChange={(event) => setIntervalSeconds(Number(event.target.value))}
               />
-              <small>固定间隔作用于 Job 的 scheduled_at；0 表示不主动错峰。</small>
+              <small>固定间隔写入每个 Job 的 scheduled_at；0 表示连续调度，但同一 Profile 仍不会并发。</small>
             </label>
             <div className="v1-batch-estimate">
-              <span>批次跨度</span>
-              <strong>{estimatedSpan} 秒</strong>
-              <small>{selectedChannels.length || 0} 个 Channel · 同 Profile 仍强制串行</small>
+              <span>本批任务</span><strong>{selectedChannels.length}</strong>
+              <small>预计调度跨度 {estimatedSpan}s</small>
             </div>
           </div>
 
-          <div className="v1-publish-summary">
-            <div><span>调度方式</span><strong>SQLite Scheduler</strong></div>
-            <div><span>Worker 策略</span><strong>跨 Profile 并发 / 同 Profile 串行</strong></div>
-            <div><span>浏览器</span><strong>Warm Session TTL</strong></div>
-          </div>
-
-          <button className="primary v1-publish-submit" type="submit" disabled={busy || channels.length === 0}>{busy ? '正在创建计划…' : actionLabel}</button>
+          <button type="submit" className="primary" disabled={busy || channels.length === 0}>{busy ? '创建中…' : actionLabel}</button>
         </section>
       </form>
     </main>

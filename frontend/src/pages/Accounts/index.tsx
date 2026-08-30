@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
 import FacebookTargetPanel from '../../FacebookTargetPanel'
+import InstagramChannelPanel from '../../InstagramChannelPanel'
 import { api, formatDateTime } from '../../app/api'
 import { PageHeader, PhaseBadge } from '../../app/page'
 
@@ -34,6 +35,12 @@ const healthLabels: Record<string, string> = {
   needs_login: '需要登录',
 }
 
+function targetTypeLabel(channel: Channel) {
+  if (channel.platform === 'facebook') return channel.target_type === 'page' ? '公共主页' : '个人主页'
+  if (channel.platform === 'instagram') return 'Instagram 账号'
+  return channel.target_type
+}
+
 export default function AccountsPage() {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
@@ -41,7 +48,7 @@ export default function AccountsPage() {
   const [message, setMessage] = useState<string | null>(null)
 
   const loadProfiles = async () => setProfiles(await api<BrowserProfile[]>('/api/browser-profiles'))
-  const loadChannels = async () => setChannels(await api<Channel[]>('/api/channels?platform=facebook'))
+  const loadChannels = async () => setChannels(await api<Channel[]>('/api/channels'))
   const load = async () => Promise.all([loadProfiles(), loadChannels()])
 
   useEffect(() => {
@@ -73,21 +80,21 @@ export default function AccountsPage() {
     <main className="v1-page">
       <PageHeader
         eyebrow="iX账号中心"
-        title="环境与发布渠道"
-        description="Environment 负责浏览器环境；Channel 代表一个真实、可执行的 Facebook 发布目标。"
-        actions={<><PhaseBadge>Phase 3</PhaseBadge><button className="primary" onClick={syncProfiles} disabled={busy}>{busy ? '同步中…' : '同步 iX 环境'}</button></>}
+        title="环境与多平台发布渠道"
+        description="Environment 负责浏览器环境；Channel 代表 Facebook / Instagram 等真实可执行发布身份。"
+        actions={<><PhaseBadge>Phase 8</PhaseBadge><button className="primary" onClick={syncProfiles} disabled={busy}>{busy ? '同步中…' : '同步 iX 环境'}</button></>}
       />
 
       {message && <div className="notice">{message}</div>}
 
       <section className="v1-panel">
-        <div className="v1-panel-heading"><div><h2>发布渠道 Channel</h2><p>发布中心只选择 Channel，不再直接选择裸 iX profile_id。</p></div><span className="v1-muted">{channels.length} 个渠道</span></div>
+        <div className="v1-panel-heading"><div><h2>发布渠道 Channel</h2><p>发布中心只选择 Channel，不直接依赖裸 iX profile_id。</p></div><span className="v1-muted">{channels.length} 个渠道</span></div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>iX 环境</th><th>分组</th><th>平台</th><th>发布目标</th><th>状态</th><th>最后检查</th></tr></thead>
             <tbody>
               {channels.length === 0 ? (
-                <tr><td colSpan={6}><div className="empty-state compact-empty"><strong>暂无 Channel</strong><span>在下方 Facebook 渠道配置中扫描并选择发布主页后，会自动生成正式 Channel。</span></div></td></tr>
+                <tr><td colSpan={6}><div className="empty-state compact-empty"><strong>暂无 Channel</strong><span>在下方平台配置中识别发布身份后，会自动生成正式 Channel。</span></div></td></tr>
               ) : channels.map((channel) => {
                 const profile = profileById.get(channel.profile_id)
                 const label = channel.enabled ? (healthLabels[channel.health_status] ?? channel.health_status) : '已停用'
@@ -95,8 +102,8 @@ export default function AccountsPage() {
                   <tr key={channel.id}>
                     <td><strong>{profile?.name || `iX #${channel.profile_id}`}</strong><br /><small>#{channel.profile_id}</small></td>
                     <td>{profile?.group_name || '未分组'}</td>
-                    <td>Facebook</td>
-                    <td><strong>{channel.target_name}</strong><br /><small>{channel.target_type === 'page' ? '公共主页' : '个人主页'}</small></td>
+                    <td><strong>{channel.platform === 'instagram' ? 'Instagram' : channel.platform === 'facebook' ? 'Facebook' : channel.platform}</strong></td>
+                    <td><strong>{channel.platform === 'instagram' ? `@${channel.target_name}` : channel.target_name}</strong><br /><small>{targetTypeLabel(channel)}</small></td>
                     <td><span className={`status-dot ${channel.enabled ? '' : 'neutral'}`}></span>{label}</td>
                     <td>{formatDateTime(channel.last_checked_at)}</td>
                   </tr>
@@ -108,7 +115,7 @@ export default function AccountsPage() {
       </section>
 
       <section className="v1-panel">
-        <div className="v1-panel-heading"><div><h2>iX Environment</h2><p>环境只描述浏览器容器、分组和可用性，不再承担发布目标语义。</p></div><span className="v1-muted">{profiles.length} 个环境</span></div>
+        <div className="v1-panel-heading"><div><h2>iX Environment</h2><p>环境只描述浏览器容器、分组和可用性，不承担具体平台发布身份语义。</p></div><span className="v1-muted">{profiles.length} 个环境</span></div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>环境</th><th>分组</th><th>状态</th><th>最后同步</th></tr></thead>
@@ -128,7 +135,9 @@ export default function AccountsPage() {
         </div>
       </section>
 
-      <p className="v1-inline-note">下面的 Facebook Target Actor 面板在 Phase 3 作为 Channel 的扫描 / 配置工具继续保留。每次选择或捕获目标都会立即同步到正式 Channel。</p>
+      <InstagramChannelPanel />
+
+      <p className="v1-inline-note">Facebook 仍保留经过实测的 Target Actor 扫描 / 配置工具；Instagram 使用 ds_user_id 作为稳定身份门禁。两个平台最终都同步为统一 Channel。</p>
       <FacebookTargetPanel />
     </main>
   )

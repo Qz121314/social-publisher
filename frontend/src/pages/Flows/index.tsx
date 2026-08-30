@@ -77,9 +77,9 @@ export default function FlowsPage() {
     <main className="v1-page">
       <PageHeader
         eyebrow="流程中心"
-        title="Browser Workflow"
-        description="正式读取 Flow → FlowRevision → FlowStep；已创建的发布计划固定绑定对应 Revision。"
-        actions={<PhaseBadge>Phase 3</PhaseBadge>}
+        title="Multi-platform Browser Workflow"
+        description="统一读取 Facebook / Instagram Flow → FlowRevision → FlowStep；已创建计划固定绑定对应平台 Revision。"
+        actions={<PhaseBadge>Phase 8</PhaseBadge>}
       />
 
       {error && <div className="notice">{error}</div>}
@@ -106,6 +106,7 @@ export default function FlowsPage() {
         ) : (
           <>
             <div className="v1-flow-meta">
+              <span>平台 {flow?.platform || '—'}</span>
               <span>Revision #{revision.version}</span>
               <span>{revision.steps.filter((step) => step.enabled).length} 个启用步骤</span>
               <span>发布时间 {formatDateTime(revision.published_at)}</span>
@@ -123,7 +124,7 @@ export default function FlowsPage() {
         )}
       </section>
 
-      <p className="v1-inline-note">下面保留现有 Facebook 高级关键词配置。它属于平台执行细节；正式任务绑定的是上方固定 Flow Revision，Phase 7 再进一步把 Adapter 内部拆成组合式模块。</p>
+      <p className="v1-inline-note">下方高级关键词仅属于 Facebook 平台兼容配置。Instagram Feed Post 使用独立 Flow Revision 和组合式 Adapter，不复用 Facebook 文本关键词。</p>
       <FacebookFlowConfigPanel />
     </main>
   )
