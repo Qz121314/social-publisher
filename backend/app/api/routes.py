@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,11 @@ from app.services.browser_sessions import BrowserSessionError, browser_sessions
 from app.services.ixbrowser import IXBrowserError, IXBrowserService
 from app.services.profile_locks import ProfileBusyError, profile_locks
 from app.services.profile_sync import sync_ix_profiles
+from app.services.runtime_settings import (
+    MAX_WARM_SESSION_TTL_SECONDS,
+    get_warm_session_ttl_seconds,
+    set_warm_session_ttl_seconds,
+)
 from app.services.scheduler import publish_scheduler
 from app.services.worker import worker_manager, worker_task_to_dict
 
@@ -27,15 +33,51 @@ router.include_router(facebook_probe_router)
 router.include_router(facebook_flow_config_router)
 
 
+class RuntimeSettingsUpdate(BaseModel):
+    warm_session_ttl_seconds: int = Field(
+        ge=0,
+        le=MAX_WARM_SESSION_TTL_SECONDS,
+    )
+
+
 @router.get("/status")
 def status() -> dict[str, object]:
     ix = IXBrowserService()
+    sessions = browser_sessions.list_sessions()
     return {
         "app": "ok",
         "ixbrowser": ix.connection_status(),
-        "browser_sessions": len(browser_sessions.list_sessions()),
+        "browser_sessions": len(sessions),
+        "browser_pool": {
+            **browser_sessions.stats(),
+            "warm_session_ttl_seconds": get_warm_session_ttl_seconds(),
+        },
         "worker": worker_manager.stats(),
         "scheduler": publish_scheduler.stats(),
+    }
+
+
+@router.get("/settings/runtime")
+def runtime_settings(db: Session = Depends(get_db)) -> dict[str, object]:
+    return {
+        "warm_session_ttl_seconds": get_warm_session_ttl_seconds(db),
+        "worker_max_workers": worker_manager.max_workers,
+        "scheduler_poll_interval_seconds": publish_scheduler.poll_interval_seconds,
+        "scheduler_batch_size": publish_scheduler.batch_size,
+    }
+
+
+@router.put("/settings/runtime")
+def update_runtime_settings(
+    payload: RuntimeSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    ttl = set_warm_session_ttl_seconds(payload.warm_session_ttl_seconds, db)
+    return {
+        "warm_session_ttl_seconds": ttl,
+        "worker_max_workers": worker_manager.max_workers,
+        "scheduler_poll_interval_seconds": publish_scheduler.poll_interval_seconds,
+        "scheduler_batch_size": publish_scheduler.batch_size,
     }
 
 
@@ -64,7 +106,7 @@ def browser_profiles(db: Session = Depends(get_db)) -> list[BrowserProfile]:
 @router.get("/browser-sessions")
 def list_browser_sessions() -> dict[str, object]:
     sessions = browser_sessions.list_sessions()
-    return {"items": sessions, "count": len(sessions)}
+    return {"items": sessions, "count": len(sessions), "pool": browser_sessions.stats()}
 
 
 @router.post("/browser-profiles/{profile_id}/open")
@@ -105,7 +147,7 @@ def close_browser_profile(
     _require_synced_profile(db, profile_id)
     try:
         profile_locks.assert_unlocked(db, profile_id)
-        return browser_sessions.close(profile_id)
+        return browser_sessions.close(profile_id, force=True)
     except ProfileBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except IXBrowserError as exc:
