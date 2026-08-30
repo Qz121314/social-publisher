@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from threading import Event, RLock, Thread
 from typing import Any
@@ -10,6 +11,8 @@ from app.database import SessionLocal
 from app.models.channel import Channel
 from app.models.content import PublishJob
 from app.models.publishing import PublishPlan
+from app.services.browser_sessions import browser_sessions
+from app.services.profile_locks import profile_locks
 from app.services.worker import WorkerManager, worker_manager
 
 
@@ -20,9 +23,9 @@ def utcnow() -> datetime:
 class PublishScheduler:
     """SQLite-backed dispatcher for formal PublishJobs.
 
-    SQLite is the source of truth. The scheduler keeps no durable in-memory
-    schedule; every tick re-discovers due jobs from the database and dispatches
-    only as many as the bounded WorkerManager currently has capacity for.
+    SQLite is the source of truth. Phase 5 also guarantees that at most one
+    PublishJob per iX profile is dispatched at a time, while different profiles
+    may still use the bounded Worker Pool concurrently.
     """
 
     def __init__(
@@ -45,6 +48,8 @@ class PublishScheduler:
         self._last_error: str | None = None
         self._dispatched_total = 0
         self._dispatch_errors_total = 0
+        self._deferred_busy_profiles_total = 0
+        self._expired_warm_sessions_total = 0
 
     def start(self) -> None:
         with self._lock:
@@ -73,11 +78,11 @@ class PublishScheduler:
                 self._thread = None
 
     def wake(self) -> None:
-        """Request an early tick after a new immediate job or manual run-now."""
         self._wake_event.set()
 
     def run_once(self, *, now: datetime | None = None) -> dict[str, Any]:
         tick_at = now or utcnow()
+        expired_warm_sessions = browser_sessions.expire_warm_sessions()
         worker_stats = self.worker.stats()
         available_slots = max(
             0,
@@ -86,11 +91,15 @@ class PublishScheduler:
         limit = min(self.batch_size, available_slots)
 
         due_job_ids: list[str] = []
+        deferred_busy = 0
+        candidate_count = 0
         if limit > 0:
             with SessionLocal() as db:
-                due_job_ids = list(
+                busy_profile_ids = self._busy_profile_ids(db)
+                candidate_limit = min(max(self.batch_size * 5, limit * 5, 50), 500)
+                candidates = list(
                     db.scalars(
-                        select(PublishJob.id)
+                        select(PublishJob)
                         .where(
                             PublishJob.plan_id.is_not(None),
                             PublishJob.status == "scheduled",
@@ -98,9 +107,24 @@ class PublishScheduler:
                             PublishJob.scheduled_at <= tick_at,
                         )
                         .order_by(PublishJob.scheduled_at.asc(), PublishJob.created_at.asc())
-                        .limit(limit)
+                        .limit(candidate_limit)
                     ).all()
                 )
+                candidate_count = len(candidates)
+
+                for job in candidates:
+                    profile_id = self._profile_id_for_job(db, job)
+                    if profile_id is not None and profile_id in busy_profile_ids:
+                        deferred_busy += 1
+                        continue
+                    due_job_ids.append(job.id)
+                    if profile_id is not None:
+                        # Reserve this profile for the remainder of this tick so
+                        # two due jobs from the same iX environment are never
+                        # submitted concurrently.
+                        busy_profile_ids.add(profile_id)
+                    if len(due_job_ids) >= limit:
+                        break
 
         dispatched: list[str] = []
         errors: list[dict[str, str]] = []
@@ -119,8 +143,8 @@ class PublishScheduler:
                     self._mark_dispatch_failure(job_id, message)
                     errors.append({"job_id": job_id, "error": message})
             except Exception as exc:
-                # Infrastructure errors remain scheduled so a later tick can retry
-                # without converting a temporary SQLite/runtime issue into a
+                # Infrastructure errors remain scheduled so a later tick can
+                # retry without converting a temporary runtime issue into a
                 # permanent publish failure.
                 errors.append({"job_id": job_id, "error": str(exc)})
 
@@ -130,11 +154,16 @@ class PublishScheduler:
                 self._last_dispatch_at = utcnow()
             self._dispatched_total += len(dispatched)
             self._dispatch_errors_total += len(errors)
+            self._deferred_busy_profiles_total += deferred_busy
+            self._expired_warm_sessions_total += expired_warm_sessions
             self._last_error = errors[-1]["error"] if errors else None
 
         return {
+            "candidates": candidate_count,
             "due": len(due_job_ids),
             "dispatched": len(dispatched),
+            "deferred_busy_profiles": deferred_busy,
+            "expired_warm_sessions": expired_warm_sessions,
             "errors": errors,
             "available_slots": available_slots,
         }
@@ -150,7 +179,10 @@ class PublishScheduler:
                 "last_dispatch_at": self._last_dispatch_at.isoformat() if self._last_dispatch_at else None,
                 "dispatched_total": self._dispatched_total,
                 "dispatch_errors_total": self._dispatch_errors_total,
+                "deferred_busy_profiles_total": self._deferred_busy_profiles_total,
+                "expired_warm_sessions_total": self._expired_warm_sessions_total,
                 "last_error": self._last_error,
+                "browser_sessions": browser_sessions.stats(),
             }
 
     def _run_loop(self) -> None:
@@ -166,6 +198,43 @@ class PublishScheduler:
             self._wake_event.clear()
         with self._lock:
             self._running = False
+
+    @classmethod
+    def _busy_profile_ids(cls, db) -> set[int]:
+        busy: set[int] = set()
+        active_jobs = list(
+            db.scalars(
+                select(PublishJob).where(
+                    PublishJob.plan_id.is_not(None),
+                    PublishJob.status.in_(["queued", "running"]),
+                )
+            ).all()
+        )
+        for job in active_jobs:
+            profile_id = cls._profile_id_for_job(db, job)
+            if profile_id is not None:
+                busy.add(profile_id)
+
+        # Browser tests, target scans, or other manual operations also use the
+        # database-backed ProfileLock. Defer scheduled publishing instead of
+        # turning a temporarily busy environment into a failed job.
+        for lock in profile_locks.list_active(db):
+            busy.add(lock.profile_id)
+        return busy
+
+    @staticmethod
+    def _profile_id_for_job(db, job: PublishJob) -> int | None:
+        if job.channel_id:
+            channel = db.get(Channel, job.channel_id)
+            if channel is not None:
+                return channel.profile_id
+        try:
+            snapshot = json.loads(job.channel_snapshot_json or "{}")
+            value = snapshot.get("profile_id") if isinstance(snapshot, dict) else None
+            profile_id = int(value)
+            return profile_id if profile_id > 0 else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
 
     @staticmethod
     def _dispatch_validation_error(job_id: str) -> str | None:
