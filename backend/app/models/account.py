@@ -58,8 +58,8 @@ class AccountGroup(Base):
     """User-owned business grouping for social accounts.
 
     This is intentionally independent from iXBrowser's own Profile groups. A
-    group is an operational selection unit for future batch login, checks and
-    publishing tasks.
+    group is an operational selection unit for batch login, checks and publishing
+    tasks.
     """
 
     __tablename__ = "account_groups"
@@ -81,6 +81,14 @@ class AccountGroup(Base):
 
 
 class Account(Base):
+    """One social account resource.
+
+    Phase 10 resource-pool architecture deliberately allows ``ix_profile_id`` to
+    be null. Bulk account import prepares account/Cookie/TOTP/proxy resources
+    first; the batch login task materializes and then permanently binds a real
+    iX Profile when the account actually needs runtime execution.
+    """
+
     __tablename__ = "accounts"
     __table_args__ = (
         UniqueConstraint("platform", "ix_profile_id", name="uq_accounts_platform_profile"),
@@ -89,13 +97,18 @@ class Account(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    ix_profile_id: Mapped[int] = mapped_column(
+    ix_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("browser_profiles.profile_id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     group_id: Mapped[int | None] = mapped_column(
         ForeignKey("account_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    proxy_id: Mapped[int | None] = mapped_column(
+        ForeignKey("proxy_endpoints.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -109,5 +122,6 @@ class Account(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    browser_profile: Mapped[BrowserProfile] = relationship(back_populates="accounts")
+    browser_profile: Mapped[BrowserProfile | None] = relationship(back_populates="accounts")
     group: Mapped[AccountGroup | None] = relationship(back_populates="accounts")
+    proxy_endpoint = relationship("ProxyEndpoint", back_populates="accounts")
