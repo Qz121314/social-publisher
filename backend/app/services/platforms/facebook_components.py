@@ -40,8 +40,6 @@ class FacebookNavigationComponent:
         self._primitives = primitives
 
     def open_target(self, driver: Chrome, content: PlatformContent) -> None:
-        # This primitive preserves the existing actor switch + actor_id == target_id
-        # checks before/after navigation. URL/name remain navigation hints only.
         self._primitives._navigate_to_target(driver, content)
 
 
@@ -84,7 +82,7 @@ class FacebookMediaComponent:
 
 
 class FacebookSubmitComponent:
-    """Bounded Next/Post state machine and final user-visible click."""
+    """Bounded Next/Post state machine and post-submit interstitial handling."""
 
     def __init__(self, primitives: UnicodeFacebookFlowAdapter) -> None:
         self._primitives = primitives
@@ -94,6 +92,14 @@ class FacebookSubmitComponent:
 
     def click(self, driver: Chrome, button: WebElement) -> None:
         self._primitives._safe_click(driver, button)
+
+    def resolve_interstitial(
+        self,
+        driver: Chrome,
+        composer: WebElement,
+        content: PlatformContent,
+    ) -> dict[str, Any]:
+        return self._primitives._resolve_post_submit_interstitial(driver, composer, content)
 
 
 class FacebookVerifierComponent:
@@ -120,9 +126,6 @@ class FacebookDiagnosticsComponent:
         driver: Chrome,
         content: PlatformContent | None = None,
     ) -> dict[str, Any]:
-        # Actor diagnostics are informative after a successful verification and
-        # must never turn a confirmed post into needs_review by introducing a new
-        # failure point. URL/title retain the same semantics as the verified flow.
         try:
             actor_id = self._primitives.current_actor_id(driver)
         except Exception:
