@@ -23,6 +23,7 @@ import './pages/Prepare/account-login.css'
 import './pages/Prepare/onboarding.css'
 import './pages/Prepare/resource-pools.css'
 import './pages/Prepare/batch-login.css'
+import './pages/Prepare/unified-resource-entry.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
