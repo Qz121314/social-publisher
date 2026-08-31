@@ -10,11 +10,9 @@ def main() -> None:
     init_db()
     assert inspect(engine).has_table("account_login_identities"), "account_login_identities table is missing"
 
-    paths = {
-        path
-        for route in app.routes
-        if (path := getattr(route, "path", None)) is not None
-    }
+    # FastAPI 0.141 keeps included routers as internal wrapper objects in
+    # app.routes. OpenAPI is the authoritative flattened public route surface.
+    paths = set(app.openapi().get("paths", {}))
     assert "/api/accounts/auth/{account_id}" in paths
     assert "/api/accounts/{account_id}/login/recover" in paths
     assert "/api/accounts/{account_id}/login/check" in paths
@@ -61,6 +59,13 @@ def main() -> None:
     machine.profile_opened()
     assert machine.session_result(LoginResult.TOTP_REQUIRED) == LoginState.SUBMITTING_TOTP
     assert machine.totp_result(LoginResult.CHECKPOINT) == LoginState.CHECKPOINT
+
+    unsafe_fallback_machine = LoginStateMachine(
+        LoginCapabilities(cookie_configured=True, password_configured=True)
+    )
+    unsafe_fallback_machine.start()
+    unsafe_fallback_machine.profile_opened()
+    assert unsafe_fallback_machine.session_result(LoginResult.UNKNOWN) == LoginState.NEEDS_REVIEW
 
     print("phase10 login executor ok")
 
