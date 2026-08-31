@@ -1,0 +1,107 @@
+.account-scope-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.account-pool-v2-row {
+  grid-template-columns: 34px minmax(180px, 1.1fr) 110px minmax(150px, .9fr) minmax(165px, 1fr) minmax(190px, 1.1fr);
+}
+
+.batch-login-progress {
+  margin-bottom: 16px;
+}
+
+.batch-login-progress .resource-pool-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-login-progress .resource-pool-toolbar strong {
+  color: var(--sp-text);
+  font-size: 13px;
+}
+
+.batch-login-progress .resource-pool-toolbar span {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+}
+
+.batch-login-job-list {
+  display: grid;
+  border-top: 1px solid var(--sp-divider);
+}
+
+.batch-login-job-list > div {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 130px minmax(220px, 1.5fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--sp-divider);
+}
+
+.batch-login-job-list > div:last-child {
+  border-bottom: 0;
+}
+
+.batch-login-job-list strong {
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-login-job-list span {
+  color: var(--sp-text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.batch-login-job-list small {
+  overflow: hidden;
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-advanced-tools {
+  margin-top: 16px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-surface);
+}
+
+.account-advanced-tools > summary {
+  padding: 11px 14px;
+  color: var(--sp-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.account-advanced-tools > div {
+  padding: 0 14px 14px;
+}
+
+@media (max-width: 980px) {
+  .account-pool-v2-row {
+    min-width: 960px;
+  }
+}
+
+@media (max-width: 760px) {
+  .account-scope-actions {
+    width: 100%;
+  }
+
+  .batch-login-job-list > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
