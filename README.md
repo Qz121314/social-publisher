@@ -509,7 +509,10 @@ Windows 本地使用 DPAPI 加密存储。
 9. 分组 → 批量发帖
 10. 账号维护任务
 11. Tauri 2 Windows Desktop Shell / Window Manager
+12. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
 ```
+
+Messenger Relay 已列为正式后续能力，但当前不打断发布主线；待现有发布能力稳定后按独立 MR 阶段开发。
 
 ---
 
@@ -525,3 +528,37 @@ Windows 本地使用 DPAPI 加密存储。
 - 清理旧入口必须在新路径完成迁移和验证后进行。
 
 详细 Phase 10 设计见 `docs/`。
+
+---
+
+## 13. Messenger Relay（正式规划）
+
+Social Publisher 后续增加独立 `Messenger Relay` 领域，用于把 Facebook Page 私信双向中继到 `customer-service`。
+
+核心链路：
+
+```text
+Facebook Messenger
+        ↕
+Social Publisher Messenger Relay
+        ↕
+customer-service
+        ↓
+现有分流规则 / Conversation Ownership / ACL
+        ↓
+客服 A / B / C / D / E
+```
+
+职责边界：
+
+- Social Publisher 负责 Facebook Account、固定 iX Profile、Session、Page Identity、私信监听和消息发送。
+- `customer-service` 继续作为分流规则、客服状态、Conversation 归属、会话隔离和客服工作台的唯一 Source of Truth。
+- Messenger Relay 本身不实现自动聊天机器人，不重新实现客服分流。
+- FastAPI 作为控制面；Facebook Messenger 数据面使用独立 Relay Worker，V1 计划以 Node.js 22+ 和可替换 `FacebookTransport` 抽象实现。
+- V1 首先本地运行，复用现有 iXBrowser 环境；先完成单账号 / 单 Page 双向 POC，再验证单账号 / 三 Page、多 Page Identity、消息去重、MQTT/WebSocket 重连和长期稳定性。
+- 一个 Facebook Account 固定对应一个 iX Profile、独立 Session 和独立 Relay Worker；一个 Account 可以管理多个 Pages。
+- Cookie / AppState / Password 等敏感信息不得进入普通 SQLite 或普通日志，继续复用 Credential Vault / DPAPI 安全边界。
+- 不绕过 CAPTCHA、Checkpoint、MFA 或平台安全挑战。
+- 本地 24h → 72h → 7 天稳定性验证通过后，再考虑多账号和 VPS 长期运行。
+
+完整要求：[`docs/messenger-relay-v1.md`](docs/messenger-relay-v1.md)。
