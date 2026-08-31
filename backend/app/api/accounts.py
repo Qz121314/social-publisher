@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models.account import Account, AccountGroup, BrowserProfile
 from app.models.resource_pool import ProxyEndpoint
 from app.schemas.account import (
+    AccountBatchEdit,
     AccountBatchMove,
     AccountCreate,
     AccountOnboardCreate,
@@ -170,17 +171,10 @@ def move_accounts_to_group(
     payload: AccountBatchMove,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    _require_group(db, payload.group_id)
+    """Compatibility endpoint; the product UI now uses /batch/edit."""
 
-    requested_ids = list(dict.fromkeys(payload.account_ids))
-    accounts = list(db.scalars(select(Account).where(Account.id.in_(requested_ids))).all())
-    found_ids = {account.id for account in accounts}
-    missing = [account_id for account_id in requested_ids if account_id not in found_ids]
-    if missing:
-        raise HTTPException(
-            status_code=404,
-            detail=f"未找到账号：{', '.join(str(item) for item in missing[:10])}",
-        )
+    _require_group(db, payload.group_id)
+    accounts = _load_accounts_or_404(db, payload.account_ids)
 
     for account in accounts:
         account.group_id = payload.group_id
@@ -189,6 +183,105 @@ def move_accounts_to_group(
         "status": "ok",
         "moved": len(accounts),
         "group_id": payload.group_id,
+    }
+
+
+@router.post("/batch/edit")
+def edit_accounts_batch(
+    payload: AccountBatchEdit,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Atomically update product-level account resources.
+
+    Proxy automation only considers enabled, non-error SOCKS5 endpoints. When
+    replacing existing assignments, proxies held exclusively by the selected
+    targets are released back into the candidate pool before reassignment.
+    """
+
+    accounts = _load_accounts_or_404(db, payload.account_ids)
+    accounts.sort(key=lambda item: item.id)
+
+    target_group_id: int | None = None
+    if payload.group_mode == "set":
+        group = _require_group(db, payload.group_id)
+        target_group_id = group.id if group else None
+
+    proxy_targets: list[Account] = []
+    proxy_candidates: list[ProxyEndpoint] = []
+    if payload.proxy_mode in {"auto_missing", "auto_replace"}:
+        proxy_targets = [
+            account
+            for account in accounts
+            if payload.proxy_mode == "auto_replace" or account.proxy_id is None
+        ]
+        if proxy_targets:
+            target_ids = [account.id for account in proxy_targets]
+            used_statement = select(Account.proxy_id).where(
+                Account.proxy_id.is_not(None),
+                Account.id.not_in(target_ids),
+            )
+            used_proxy_ids = {
+                proxy_id
+                for proxy_id in db.scalars(used_statement).all()
+                if proxy_id is not None
+            }
+            proxy_statement = select(ProxyEndpoint).where(
+                ProxyEndpoint.enabled.is_(True),
+                ProxyEndpoint.status != "error",
+            )
+            if used_proxy_ids:
+                proxy_statement = proxy_statement.where(
+                    ProxyEndpoint.id.not_in(used_proxy_ids)
+                )
+            proxy_candidates = list(
+                db.scalars(proxy_statement.order_by(ProxyEndpoint.id)).all()
+            )
+            if len(proxy_candidates) < len(proxy_targets):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"未分配可用 IP 只有 {len(proxy_candidates)} 个，"
+                        f"但当前需要 {len(proxy_targets)} 个。"
+                    ),
+                )
+
+    group_changed = 0
+    enabled_changed = 0
+    proxy_cleared = 0
+    proxy_assigned = 0
+
+    if payload.group_mode != "keep":
+        next_group_id = target_group_id if payload.group_mode == "set" else None
+        for account in accounts:
+            if account.group_id != next_group_id:
+                account.group_id = next_group_id
+                group_changed += 1
+
+    if payload.enabled is not None:
+        for account in accounts:
+            if account.enabled != payload.enabled:
+                account.enabled = payload.enabled
+                enabled_changed += 1
+
+    if payload.proxy_mode == "clear":
+        for account in accounts:
+            if account.proxy_id is not None:
+                account.proxy_id = None
+                proxy_cleared += 1
+    elif payload.proxy_mode in {"auto_missing", "auto_replace"}:
+        for account, endpoint in zip(proxy_targets, proxy_candidates, strict=False):
+            if account.proxy_id != endpoint.id:
+                account.proxy_id = endpoint.id
+                proxy_assigned += 1
+
+    db.commit()
+    return {
+        "status": "ok",
+        "edited": len(accounts),
+        "group_changed": group_changed,
+        "enabled_changed": enabled_changed,
+        "proxy_assigned": proxy_assigned,
+        "proxy_cleared": proxy_cleared,
     }
 
 
@@ -315,7 +408,30 @@ def _require_proxy(db: Session, proxy_id: int) -> ProxyEndpoint:
     endpoint = db.get(ProxyEndpoint, proxy_id)
     if endpoint is None:
         raise HTTPException(status_code=400, detail="IP池中的 SOCKS5 不存在。")
+    if not endpoint.enabled:
+        raise HTTPException(status_code=400, detail="所选 SOCKS5 已停用。")
+    if endpoint.status == "error":
+        raise HTTPException(status_code=400, detail="所选 SOCKS5 当前状态异常。")
     return endpoint
+
+
+def _load_accounts_or_404(db: Session, account_ids: list[int]) -> list[Account]:
+    requested_ids = list(dict.fromkeys(account_ids))
+    accounts = list(
+        db.scalars(
+            select(Account)
+            .where(Account.id.in_(requested_ids))
+            .order_by(Account.id)
+        ).all()
+    )
+    found_ids = {account.id for account in accounts}
+    missing = [account_id for account_id in requested_ids if account_id not in found_ids]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未找到账号：{', '.join(str(item) for item in missing[:10])}",
+        )
+    return accounts
 
 
 def _get_account_or_404(db: Session, account_id: int) -> Account:

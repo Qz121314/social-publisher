@@ -217,3 +217,28 @@ class AccountOnboardRead(BaseModel):
 class AccountBatchMove(BaseModel):
     account_ids: list[int] = Field(min_length=1, max_length=1000)
     group_id: int | None = None
+
+
+class AccountBatchEdit(BaseModel):
+    """One atomic bulk edit over existing account resources."""
+
+    account_ids: list[int] = Field(min_length=1, max_length=1000)
+    group_mode: Literal["keep", "set", "clear"] = "keep"
+    group_id: int | None = Field(default=None, ge=1)
+    proxy_mode: Literal["keep", "auto_missing", "auto_replace", "clear"] = "keep"
+    enabled: bool | None = None
+
+    @field_validator("account_ids")
+    @classmethod
+    def unique_ids(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def validate_edit(self):
+        if self.group_mode == "set" and self.group_id is None:
+            raise ValueError("批量移动到指定分组时必须选择目标分组。")
+        if self.group_mode != "set" and self.group_id is not None:
+            raise ValueError("仅在分组操作为“指定分组”时提交 group_id。")
+        if self.group_mode == "keep" and self.proxy_mode == "keep" and self.enabled is None:
+            raise ValueError("没有选择任何批量修改项。")
+        return self

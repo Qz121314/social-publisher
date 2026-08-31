@@ -55,6 +55,35 @@ type BatchTask = {
   jobs: TaskJob[]
 }
 
+type ImportPreviewRow = {
+  name: string
+  platform: string
+  group_name?: string | null
+  proxy_id?: number | null
+  login_configured: boolean
+  password_configured: boolean
+  totp_configured: boolean
+  cookie_configured: boolean
+  action: 'create' | 'skip'
+  reason?: string | null
+}
+
+type ImportPreview = {
+  received: number
+  creatable: number
+  skipped: number
+  groups_to_create: string[]
+  rows: ImportPreviewRow[]
+}
+
+type BatchEditResult = {
+  edited: number
+  group_changed: number
+  enabled_changed: number
+  proxy_assigned: number
+  proxy_cleared: number
+}
+
 type Scope = 'all' | 'ungrouped' | number
 type GroupEditor = { mode: 'create' | 'edit'; group?: AccountGroup } | null
 type ImportResult = { received: number; created: number; skipped: number }
@@ -102,6 +131,16 @@ function snapshotName(raw: string) {
   }
 }
 
+function secretSummary(row: ImportPreviewRow) {
+  const values = [
+    row.login_configured ? '登录账号' : null,
+    row.password_configured ? '密码' : null,
+    row.totp_configured ? '2FA' : null,
+    row.cookie_configured ? 'Cookie' : null,
+  ].filter(Boolean)
+  return values.length > 0 ? values.join(' · ') : '未配置登录凭据'
+}
+
 export default function AccountPoolV2Page() {
   const [groups, setGroups] = useState<AccountGroup[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -111,9 +150,10 @@ export default function AccountPoolV2Page() {
   const [selected, setSelected] = useState<number[]>([])
   const [groupEditor, setGroupEditor] = useState<GroupEditor>(null)
   const [createOpen, setCreateOpen] = useState(false)
-  const [moveOpen, setMoveOpen] = useState(false)
+  const [batchEditOpen, setBatchEditOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
   const [authAccount, setAuthAccount] = useState<Account | null>(null)
   const [activeBatch, setActiveBatch] = useState<BatchTask | null>(null)
   const [busy, setBusy] = useState(false)
@@ -199,7 +239,9 @@ export default function AccountPoolV2Page() {
       setMessage(`批量登录已开始：${task.total_jobs} 个账号进入执行队列。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const createAccount = async (event: FormEvent<HTMLFormElement>) => {
@@ -230,7 +272,9 @@ export default function AccountPoolV2Page() {
       setMessage(`账号“${created.name}”已加入账号池。首次登录时再创建固定 iX 环境。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const saveGroup = async (event: FormEvent<HTMLFormElement>) => {
@@ -252,7 +296,9 @@ export default function AccountPoolV2Page() {
       setMessage(groupEditor.mode === 'create' ? `分组“${name}”已创建。` : '分组已更新。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const deleteCurrentGroup = async () => {
@@ -266,49 +312,96 @@ export default function AccountPoolV2Page() {
       setMessage('空分组已删除。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const updateImportText = (text: string) => {
+    setImportText(text)
+    setImportPreview(null)
+  }
+
+  const previewAccounts = async () => {
+    if (!importText.trim() || busy) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const preview = await api<ImportPreview>('/api/account-pool/import/preview', {
+        method: 'POST',
+        body: JSON.stringify({ text: importText }),
+      })
+      setImportPreview(preview)
+    } catch (error) {
+      setImportPreview(null)
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const importAccounts = async (event: FormEvent) => {
     event.preventDefault()
-    if (!importText.trim()) return
+    if (!importText.trim() || !importPreview || importPreview.creatable === 0 || busy) return
     setBusy(true)
+    setMessage(null)
     try {
-      const result = await api<ImportResult>('/api/account-pool/import', { method: 'POST', body: JSON.stringify({ text: importText }) })
+      const result = await api<ImportResult>('/api/account-pool/import', {
+        method: 'POST',
+        body: JSON.stringify({ text: importText }),
+      })
       await load()
       setImportOpen(false)
       setImportText('')
+      setImportPreview(null)
       setMessage(`账号池导入完成：新增 ${result.created}，跳过重复 ${result.skipped}。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const moveSelected = async (event: FormEvent<HTMLFormElement>) => {
+  const saveBatchEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const groupValue = String(new FormData(event.currentTarget).get('group_id') ?? '')
-    setBusy(true)
-    try {
-      await api('/api/accounts/batch/group', { method: 'POST', body: JSON.stringify({ account_ids: selected, group_id: groupValue ? Number(groupValue) : null }) })
-      setSelected([])
-      setMoveOpen(false)
-      await load()
-      setMessage('账号分组已批量更新。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
-  }
-
-  const assignProxy = async () => {
     if (selected.length === 0 || busy) return
+    const form = new FormData(event.currentTarget)
+    const groupMode = String(form.get('group_mode') ?? 'keep')
+    const groupId = String(form.get('group_id') ?? '')
+    const proxyMode = String(form.get('proxy_mode') ?? 'keep')
+    const enabledMode = String(form.get('enabled_mode') ?? 'keep')
+
+    const body: Record<string, unknown> = {
+      account_ids: selected,
+      group_mode: groupMode,
+      proxy_mode: proxyMode,
+    }
+    if (groupMode === 'set') body.group_id = groupId ? Number(groupId) : null
+    if (enabledMode === 'enabled') body.enabled = true
+    if (enabledMode === 'disabled') body.enabled = false
+
     setBusy(true)
+    setMessage(null)
     try {
-      const result = await api<{ assigned: number; unchanged: number }>('/api/account-pool/batch/assign-proxy', { method: 'POST', body: JSON.stringify({ account_ids: selected, replace_existing: false }) })
+      const result = await api<BatchEditResult>('/api/accounts/batch/edit', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
       await load()
-      setMessage(`IP 自动分配完成：新分配 ${result.assigned}，保持原分配 ${result.unchanged}。`)
+      setBatchEditOpen(false)
+      setSelected([])
+      const details = [
+        result.group_changed > 0 ? `分组 ${result.group_changed}` : null,
+        result.proxy_assigned > 0 ? `分配 IP ${result.proxy_assigned}` : null,
+        result.proxy_cleared > 0 ? `解除 IP ${result.proxy_cleared}` : null,
+        result.enabled_changed > 0 ? `状态 ${result.enabled_changed}` : null,
+      ].filter(Boolean)
+      setMessage(`已批量检查并更新 ${result.edited} 个账号${details.length ? `：${details.join('，')}` : '。'}`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const loggedInCount = visibleAccounts.filter((item) => loggedInStates.has(item.status)).length
@@ -323,16 +416,34 @@ export default function AccountPoolV2Page() {
       <WorkspaceHeader
         title="账号池"
         description="账号可以单个添加，也可以 CSV 批量导入。Cookie、密码、2FA、分组和固定 IP 都在这里准备；iX 环境在首次任务执行时按需创建。"
-        actions={<><Button onClick={() => setCreateOpen(true)}><PlusIcon />添加账号</Button><Button variant="primary" onClick={() => setImportOpen(true)}>批量导入</Button></>}
+        actions={<><Button onClick={() => setCreateOpen(true)}><PlusIcon />添加账号</Button><Button variant="primary" onClick={() => { setImportPreview(null); setImportOpen(true) }}>批量导入</Button></>}
       />
       <PrepareNav />
       {message && <div className="prepare-message">{message}</div>}
 
       {activeBatch && batchView && (
         <section className="resource-pool-shell batch-login-progress">
-          <div className="resource-pool-toolbar"><div><strong>批量登录</strong><span>任务 #{activeBatch.id.slice(0, 8)}</span></div><div><StatusChip tone={batchView.tone}>{batchView.label}</StatusChip><Button variant="ghost" onClick={() => setActiveBatch(null)}>收起</Button></div></div>
-          <div className="resource-pool-summary"><div><span>进度</span><strong>{batchDone} / {activeBatch.total_jobs}</strong></div><div><span>已完成</span><strong>{activeBatch.succeeded_jobs}</strong></div><div><span>需要处理</span><strong>{activeBatch.attention_jobs}</strong></div><div><span>失败</span><strong>{activeBatch.failed_jobs}</strong></div></div>
-          {activeBatch.jobs.some((job) => job.status !== 'succeeded') && <div className="batch-login-job-list">{activeBatch.jobs.filter((job) => job.status !== 'succeeded').slice(0, 12).map((job) => <div key={job.id}><strong>{snapshotName(job.account_snapshot_json)}</strong><span>{jobStageLabel(job.stage)}</span><small>{job.error_message || (job.status === 'queued' ? '等待可用执行槽位' : '处理中')}</small></div>)}</div>}
+          <div className="resource-pool-toolbar">
+            <div><strong>批量登录</strong><span>任务 #{activeBatch.id.slice(0, 8)}</span></div>
+            <div><StatusChip tone={batchView.tone}>{batchView.label}</StatusChip><Button variant="ghost" onClick={() => setActiveBatch(null)}>收起</Button></div>
+          </div>
+          <div className="resource-pool-summary">
+            <div><span>进度</span><strong>{batchDone} / {activeBatch.total_jobs}</strong></div>
+            <div><span>已完成</span><strong>{activeBatch.succeeded_jobs}</strong></div>
+            <div><span>需要处理</span><strong>{activeBatch.attention_jobs}</strong></div>
+            <div><span>失败</span><strong>{activeBatch.failed_jobs}</strong></div>
+          </div>
+          {activeBatch.jobs.some((job) => job.status !== 'succeeded') && (
+            <div className="batch-login-job-list">
+              {activeBatch.jobs.filter((job) => job.status !== 'succeeded').slice(0, 12).map((job) => (
+                <div key={job.id}>
+                  <strong>{snapshotName(job.account_snapshot_json)}</strong>
+                  <span>{jobStageLabel(job.stage)}</span>
+                  <small>{job.error_message || (job.status === 'queued' ? '等待可用执行槽位' : '处理中')}</small>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -342,30 +453,74 @@ export default function AccountPoolV2Page() {
           <button type="button" className={scope === 'all' ? 'is-active' : ''} onClick={() => changeScope('all')}><span>全部账号</span><strong>{accounts.length}</strong></button>
           <button type="button" className={scope === 'ungrouped' ? 'is-active' : ''} onClick={() => changeScope('ungrouped')}><span>未分组</span><strong>{ungroupedCount}</strong></button>
           <div className="account-group-divider" />
-          {groups.map((group) => <button key={group.id} type="button" className={scope === group.id ? 'is-active' : ''} onClick={() => changeScope(group.id)}><span>{group.name}</span><strong>{group.member_count}</strong></button>)}
+          {groups.map((group) => (
+            <button key={group.id} type="button" className={scope === group.id ? 'is-active' : ''} onClick={() => changeScope(group.id)}>
+              <span>{group.name}</span><strong>{group.member_count}</strong>
+            </button>
+          ))}
           <button type="button" className="account-group-add" onClick={() => setGroupEditor({ mode: 'create' })}><PlusIcon />新建分组</button>
         </aside>
 
         <div className="account-list-pane">
           <header className="account-scope-header">
-            <div><div className="account-scope-title-row"><h2>{scopeTitle}</h2><StatusChip tone="neutral">{visibleAccounts.length} 个账号</StatusChip></div><p>{currentGroup?.description || '单个、当前选择和整个分组最终都进入同一套任务引擎。'}</p></div>
-            <div className="account-scope-actions">{currentGroup && <Button variant="primary" onClick={() => startBatchLogin('group')} disabled={busy || visibleAccounts.length === 0}>批量登录</Button>}{currentGroup && <Button variant="ghost" onClick={() => setGroupEditor({ mode: 'edit', group: currentGroup })}>管理分组</Button>}</div>
+            <div>
+              <div className="account-scope-title-row"><h2>{scopeTitle}</h2><StatusChip tone="neutral">{visibleAccounts.length} 个账号</StatusChip></div>
+              <p>{currentGroup?.description || '单个、当前选择和整个分组最终都进入同一套任务引擎。'}</p>
+            </div>
+            <div className="account-scope-actions">
+              {currentGroup && <Button variant="primary" onClick={() => startBatchLogin('group')} disabled={busy || visibleAccounts.length === 0}>批量登录</Button>}
+              {currentGroup && <Button variant="ghost" onClick={() => setGroupEditor({ mode: 'edit', group: currentGroup })}>管理分组</Button>}
+            </div>
           </header>
 
-          <div className="account-status-strip account-pool-status-strip"><div><span>已登录</span><strong>{loggedInCount}</strong></div><div><span>需要处理</span><strong>{attentionCount}</strong></div><div><span>未分配 IP</span><strong>{noProxyCount}</strong></div><div><span>待创建 iX 环境</span><strong>{noRuntimeCount}</strong></div></div>
-          <div className="account-toolbar"><div className="environment-search account-search"><SearchIcon /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号、IP或环境…" /></div><span className="account-toolbar-note">单个添加和批量导入使用同一个账号池。</span></div>
+          <div className="account-status-strip account-pool-status-strip">
+            <div><span>已登录</span><strong>{loggedInCount}</strong></div>
+            <div><span>需要处理</span><strong>{attentionCount}</strong></div>
+            <div><span>未分配 IP</span><strong>{noProxyCount}</strong></div>
+            <div><span>待创建 iX 环境</span><strong>{noRuntimeCount}</strong></div>
+          </div>
 
-          {selected.length > 0 && <div className="environment-selection-bar account-selection-bar"><strong>已选择 {selected.length} 个账号</strong><span>当前选择可直接创建任务或批量整理资源。</span><div><Button variant="primary" onClick={() => startBatchLogin('selection')} disabled={busy}>批量登录</Button><Button onClick={() => setMoveOpen(true)}>移动分组</Button><Button onClick={assignProxy} disabled={busy}>自动分配 IP</Button></div></div>}
+          <div className="account-toolbar">
+            <div className="environment-search account-search"><SearchIcon /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号、IP或环境…" /></div>
+            <span className="account-toolbar-note">单个添加和批量导入使用同一个账号池。</span>
+          </div>
+
+          {selected.length > 0 && (
+            <div className="environment-selection-bar account-selection-bar">
+              <strong>已选择 {selected.length} 个账号</strong>
+              <span>批量资源修改集中在一个入口，提交后一次性生效。</span>
+              <div>
+                <Button variant="primary" onClick={() => startBatchLogin('selection')} disabled={busy}>批量登录</Button>
+                <Button onClick={() => setBatchEditOpen(true)} disabled={busy}>批量编辑</Button>
+              </div>
+            </div>
+          )}
 
           <div className="account-table account-pool-table" role="table" aria-label="账号池">
-            <div className="account-row account-row--head" role="row"><div><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} aria-label="选择当前列表全部账号" /></div><div>账号</div><div>分组</div><div>固定 IP</div><div>iX 环境</div><div>登录状态</div></div>
-            {visibleAccounts.length === 0 ? <EmptyState title="账号池为空" description="可以添加单个账号，也可以批量导入 CSV。" /> : visibleAccounts.map((account) => (
+            <div className="account-row account-row--head" role="row">
+              <div><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} aria-label="选择当前列表全部账号" /></div>
+              <div>账号</div><div>分组</div><div>固定 IP</div><div>iX 环境</div><div>登录状态</div>
+            </div>
+            {visibleAccounts.length === 0 ? (
+              <EmptyState title="账号池为空" description="可以添加单个账号，也可以批量导入 CSV。" />
+            ) : visibleAccounts.map((account) => (
               <div className="account-row account-pool-v2-row" role="row" key={account.id}>
                 <div><input type="checkbox" checked={selectedSet.has(account.id)} onChange={() => setSelected((current) => current.includes(account.id) ? current.filter((id) => id !== account.id) : [...current, account.id])} aria-label={`选择 ${account.name}`} /></div>
-                <div className="account-primary-cell"><span className="account-avatar"><AccountIcon /></span><div><strong>{account.name}</strong><span>{platformLabel(account.platform)} · 账号 #{account.id}</span></div></div>
+                <div className="account-primary-cell">
+                  <span className="account-avatar"><AccountIcon /></span>
+                  <div><strong>{account.name}</strong><span>{platformLabel(account.platform)} · 账号 #{account.id}{account.enabled ? '' : ' · 已停用'}</span></div>
+                </div>
                 <div><span className="account-group-name">{account.group?.name || '未分组'}</span></div>
-                <div className="account-env-cell">{account.proxy_endpoint ? <><strong>{account.proxy_endpoint.host}:{account.proxy_endpoint.port}</strong><span>IP #{account.proxy_endpoint.id}</span></> : <StatusChip tone="warning">未分配</StatusChip>}</div>
-                <div className="account-env-cell">{account.browser_profile && account.ix_profile_id ? <><strong>{account.browser_profile.name}</strong><span>iX #{account.ix_profile_id}</span></> : <StatusChip tone="neutral">首次任务时创建</StatusChip>}</div>
+                <div className="account-env-cell">
+                  {account.proxy_endpoint
+                    ? <><strong>{account.proxy_endpoint.host}:{account.proxy_endpoint.port}</strong><span>IP #{account.proxy_endpoint.id}</span></>
+                    : <StatusChip tone="warning">未分配</StatusChip>}
+                </div>
+                <div className="account-env-cell">
+                  {account.browser_profile && account.ix_profile_id
+                    ? <><strong>{account.browser_profile.name}</strong><span>iX #{account.ix_profile_id}</span></>
+                    : <StatusChip tone="neutral">首次任务时创建</StatusChip>}
+                </div>
                 <AccountLoginControl account={account} onChanged={load} onMessage={setMessage} onOpenSettings={() => setAuthAccount(account)} />
               </div>
             ))}
@@ -375,13 +530,150 @@ export default function AccountPoolV2Page() {
 
       <details className="account-advanced-tools"><summary>高级渠道工具</summary><div><FacebookTargetPanel /><InstagramChannelPanel /></div></details>
 
-      {createOpen && <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setCreateOpen(false)}><div className="sp-form-dialog resource-import-dialog" role="dialog" aria-modal="true" aria-label="添加账号" onMouseDown={(event) => event.stopPropagation()}><form onSubmit={createAccount}><header><div><span>账号池</span><h2>添加账号</h2></div><button type="button" onClick={() => setCreateOpen(false)} disabled={busy}>×</button></header><div className="resource-import-body"><div className="resource-entry-grid"><label><span>账号名称</span><input name="name" placeholder="FB-001" required /></label><label><span>平台</span><select name="platform" defaultValue="facebook"><option value="facebook">Facebook</option><option value="instagram">Instagram</option></select></label></div><div className="resource-entry-grid"><label><span>分组</span><select name="group_id" defaultValue={typeof scope === 'number' ? String(scope) : ''}><option value="">未分组</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><label><span>固定 IP</span><select name="proxy_id" defaultValue=""><option value="">稍后分配</option>{proxies.filter((proxy) => proxy.enabled && proxy.status !== 'error').map((proxy) => <option key={proxy.id} value={proxy.id}>#{proxy.id} · {proxy.host}:{proxy.port}</option>)}</select></label></div><label><span>登录账号（可选）</span><input name="login_identifier" placeholder="邮箱 / 手机号 / 用户名" /></label><div className="resource-entry-grid"><label><span>密码（可选）</span><input name="password" type="password" /></label><label><span>TOTP / 2FA Secret（可选）</span><input name="totp_secret" /></label></div><label><span>Cookie（可选）</span><textarea name="cookie_json" rows={6} placeholder='[{"name":"c_user","value":"...","domain":".facebook.com"}]' /></label><label><span>备注（可选）</span><textarea name="notes" rows={2} /></label><div className="account-dialog-hint">保存账号不会立即创建 iX 环境。密码、Cookie、TOTP 使用 Windows DPAPI 加密保存。</div></div><footer><Button type="button" onClick={() => setCreateOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy}>{busy ? '保存中…' : '保存账号'}</Button></footer></form></div></div>}
+      {createOpen && (
+        <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setCreateOpen(false)}>
+          <div className="sp-form-dialog resource-import-dialog" role="dialog" aria-modal="true" aria-label="添加账号" onMouseDown={(event) => event.stopPropagation()}>
+            <form onSubmit={createAccount}>
+              <header><div><span>账号池</span><h2>添加账号</h2></div><button type="button" onClick={() => setCreateOpen(false)} disabled={busy}>×</button></header>
+              <div className="resource-import-body">
+                <div className="resource-entry-grid">
+                  <label><span>账号名称</span><input name="name" placeholder="FB-001" required /></label>
+                  <label><span>平台</span><select name="platform" defaultValue="facebook"><option value="facebook">Facebook</option><option value="instagram">Instagram</option></select></label>
+                </div>
+                <div className="resource-entry-grid">
+                  <label><span>分组</span><select name="group_id" defaultValue={typeof scope === 'number' ? String(scope) : ''}><option value="">未分组</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                  <label><span>固定 IP</span><select name="proxy_id" defaultValue=""><option value="">稍后分配</option>{proxies.filter((proxy) => proxy.enabled && proxy.status !== 'error').map((proxy) => <option key={proxy.id} value={proxy.id}>#{proxy.id} · {proxy.host}:{proxy.port}</option>)}</select></label>
+                </div>
+                <label><span>登录账号（可选）</span><input name="login_identifier" placeholder="邮箱 / 手机号 / 用户名" /></label>
+                <div className="resource-entry-grid">
+                  <label><span>密码（可选）</span><input name="password" type="password" /></label>
+                  <label><span>TOTP / 2FA Secret（可选）</span><input name="totp_secret" /></label>
+                </div>
+                <label><span>Cookie（可选）</span><textarea name="cookie_json" rows={6} placeholder='[{"name":"c_user","value":"...","domain":".facebook.com"}]' /></label>
+                <label><span>备注（可选）</span><textarea name="notes" rows={2} /></label>
+                <div className="account-dialog-hint">保存账号不会立即创建 iX 环境。密码、Cookie、TOTP 使用 Windows DPAPI 加密保存。</div>
+              </div>
+              <footer><Button type="button" onClick={() => setCreateOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy}>{busy ? '保存中…' : '保存账号'}</Button></footer>
+            </form>
+          </div>
+        </div>
+      )}
 
-      {groupEditor && <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setGroupEditor(null)}><div className="sp-form-dialog account-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><form onSubmit={saveGroup}><header><div><span>账号池</span><h2>{groupEditor.mode === 'create' ? '新建分组' : '管理分组'}</h2></div><button type="button" onClick={() => setGroupEditor(null)} disabled={busy}>×</button></header><div className="account-dialog-body"><label><span>分组名称</span><input name="name" defaultValue={groupEditor.group?.name || ''} required /></label><label><span>说明</span><textarea name="description" rows={3} defaultValue={groupEditor.group?.description || ''} /></label></div><footer>{groupEditor.mode === 'edit' && groupEditor.group?.member_count === 0 && <Button type="button" variant="danger" onClick={deleteCurrentGroup} disabled={busy}>删除空分组</Button>}<Button type="button" onClick={() => setGroupEditor(null)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy}>保存</Button></footer></form></div></div>}
+      {groupEditor && (
+        <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setGroupEditor(null)}>
+          <div className="sp-form-dialog account-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+            <form onSubmit={saveGroup}>
+              <header><div><span>账号池</span><h2>{groupEditor.mode === 'create' ? '新建分组' : '管理分组'}</h2></div><button type="button" onClick={() => setGroupEditor(null)} disabled={busy}>×</button></header>
+              <div className="account-dialog-body">
+                <label><span>分组名称</span><input name="name" defaultValue={groupEditor.group?.name || ''} required /></label>
+                <label><span>说明</span><textarea name="description" rows={3} defaultValue={groupEditor.group?.description || ''} /></label>
+              </div>
+              <footer>
+                {groupEditor.mode === 'edit' && groupEditor.group?.member_count === 0 && <Button type="button" variant="danger" onClick={deleteCurrentGroup} disabled={busy}>删除空分组</Button>}
+                <Button type="button" onClick={() => setGroupEditor(null)} disabled={busy}>取消</Button>
+                <Button type="submit" variant="primary" disabled={busy}>保存</Button>
+              </footer>
+            </form>
+          </div>
+        </div>
+      )}
 
-      {moveOpen && <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setMoveOpen(false)}><div className="sp-form-dialog account-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><form onSubmit={moveSelected}><header><div><span>批量操作</span><h2>移动 {selected.length} 个账号</h2></div><button type="button" onClick={() => setMoveOpen(false)} disabled={busy}>×</button></header><div className="account-dialog-body"><label><span>目标分组</span><select name="group_id" defaultValue=""><option value="">未分组</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label></div><footer><Button type="button" onClick={() => setMoveOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy}>移动</Button></footer></form></div></div>}
+      {batchEditOpen && (
+        <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setBatchEditOpen(false)}>
+          <div className="sp-form-dialog account-dialog" role="dialog" aria-modal="true" aria-label="批量编辑账号" onMouseDown={(event) => event.stopPropagation()}>
+            <form onSubmit={saveBatchEdit}>
+              <header><div><span>账号池</span><h2>批量编辑 {selected.length} 个账号</h2></div><button type="button" onClick={() => setBatchEditOpen(false)} disabled={busy}>×</button></header>
+              <div className="account-dialog-body">
+                <div className="resource-entry-grid">
+                  <label>
+                    <span>分组操作</span>
+                    <select name="group_mode" defaultValue="keep">
+                      <option value="keep">保持不变</option>
+                      <option value="set">移动到指定分组</option>
+                      <option value="clear">移动到未分组</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>目标分组</span>
+                    <select name="group_id" defaultValue={typeof scope === 'number' ? String(scope) : ''}>
+                      <option value="">请选择</option>
+                      {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  <span>固定 IP</span>
+                  <select name="proxy_mode" defaultValue="keep">
+                    <option value="keep">保持不变</option>
+                    <option value="auto_missing">只给未分配账号自动分配</option>
+                    <option value="auto_replace">全部重新自动分配</option>
+                    <option value="clear">解除固定 IP</option>
+                  </select>
+                </label>
+                <label>
+                  <span>账号状态</span>
+                  <select name="enabled_mode" defaultValue="keep">
+                    <option value="keep">保持不变</option>
+                    <option value="enabled">启用</option>
+                    <option value="disabled">停用</option>
+                  </select>
+                </label>
+                <div className="account-dialog-hint">“全部重新自动分配”会先释放所选账号当前独占的 IP，再从启用且非异常的 IP池中重新分配。不会修改密码、Cookie、2FA 或 iX Profile。</div>
+              </div>
+              <footer><Button type="button" onClick={() => setBatchEditOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy}>{busy ? '处理中…' : '应用批量修改'}</Button></footer>
+            </form>
+          </div>
+        </div>
+      )}
 
-      {importOpen && <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setImportOpen(false)}><div className="sp-form-dialog resource-import-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><form onSubmit={importAccounts}><header><div><span>账号池</span><h2>批量导入账号</h2></div><button type="button" onClick={() => setImportOpen(false)} disabled={busy}>×</button></header><div className="resource-import-body"><label className="resource-file-picker"><span>读取 CSV</span><input type="file" accept=".csv,text/csv" onChange={async (event) => { const file = event.target.files?.[0]; if (file) setImportText(await file.text()) }} /></label><label><span>CSV 内容</span><textarea rows={14} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={'账号名称,平台,分组,登录账号,密码,2fa,cookie,proxy,备注\nFB-001,facebook,Store A,user@example.com,password,TOTP,"[{...}]",12,主账号'} /></label><div className="account-dialog-hint">单个添加和批量导入写入同一个账号池；批量导入不会预先创建 iX 环境。</div></div><footer><Button type="button" onClick={() => setImportOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy || !importText.trim()}>{busy ? '导入中…' : '开始导入'}</Button></footer></form></div></div>}
+      {importOpen && (
+        <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setImportOpen(false)}>
+          <div className="sp-form-dialog resource-import-dialog" role="dialog" aria-modal="true" aria-label="批量导入账号" onMouseDown={(event) => event.stopPropagation()}>
+            <form onSubmit={importAccounts}>
+              <header><div><span>账号池</span><h2>批量导入账号</h2></div><button type="button" onClick={() => setImportOpen(false)} disabled={busy}>×</button></header>
+              <div className="resource-import-body">
+                <label className="resource-file-picker">
+                  <span>读取 CSV</span>
+                  <input type="file" accept=".csv,text/csv" onChange={async (event) => { const file = event.target.files?.[0]; if (file) updateImportText(await file.text()) }} />
+                </label>
+                <label>
+                  <span>CSV 内容</span>
+                  <textarea rows={12} value={importText} onChange={(event) => updateImportText(event.target.value)} placeholder={'账号名称,平台,分组,登录账号,密码,2fa,cookie,proxy,备注\nFB-001,facebook,Store A,user@example.com,password,TOTP,"[{...}]",12,主账号'} />
+                </label>
+
+                {importPreview ? (
+                  <>
+                    <div className="resource-pool-summary">
+                      <div><span>读取</span><strong>{importPreview.received}</strong></div>
+                      <div><span>可新增</span><strong>{importPreview.creatable}</strong></div>
+                      <div><span>重复跳过</span><strong>{importPreview.skipped}</strong></div>
+                      <div><span>新建分组</span><strong>{importPreview.groups_to_create.length}</strong></div>
+                    </div>
+                    {importPreview.groups_to_create.length > 0 && <div className="account-dialog-hint">导入时将自动创建分组：{importPreview.groups_to_create.join('、')}</div>}
+                    <div className="batch-login-job-list">
+                      {importPreview.rows.slice(0, 12).map((row, index) => (
+                        <div key={`${row.name}-${index}`}>
+                          <strong>{row.name}</strong>
+                          <span>{platformLabel(row.platform)} · {row.group_name || '未分组'} · {row.proxy_id ? `IP #${row.proxy_id}` : '未分配 IP'}</span>
+                          <small>{row.action === 'skip' ? row.reason : secretSummary(row)}</small>
+                        </div>
+                      ))}
+                    </div>
+                    {importPreview.rows.length > 12 && <div className="account-dialog-hint">仅预览前 12 行；全部 {importPreview.received} 行均已完成服务端校验。</div>}
+                  </>
+                ) : (
+                  <div className="account-dialog-hint">先执行预检。服务端会验证 CSV、Cookie、TOTP、分组与 IP 引用，但不会把密码、Cookie 或 2FA 内容回显到前端。</div>
+                )}
+              </div>
+              <footer>
+                <Button type="button" onClick={() => setImportOpen(false)} disabled={busy}>取消</Button>
+                <Button type="button" onClick={previewAccounts} disabled={busy || !importText.trim()}>{busy ? '检查中…' : '预检'}</Button>
+                <Button type="submit" variant="primary" disabled={busy || !importPreview || importPreview.creatable === 0}>{busy ? '导入中…' : `导入 ${importPreview?.creatable ?? 0} 个账号`}</Button>
+              </footer>
+            </form>
+          </div>
+        </div>
+      )}
 
       {authAccount && <AccountAuthDrawer account={authAccount} onClose={() => setAuthAccount(null)} onSaved={(text) => { setMessage(text); load() }} />}
     </main>

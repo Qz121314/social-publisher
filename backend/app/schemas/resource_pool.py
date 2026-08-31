@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -33,15 +34,6 @@ class ProxyBatchDelete(BaseModel):
     proxy_ids: list[int] = Field(min_length=1, max_length=1000)
 
 
-class ProxyHealthCheckRequest(BaseModel):
-    proxy_ids: list[int] = Field(min_length=1, max_length=200)
-
-    @field_validator("proxy_ids")
-    @classmethod
-    def unique_proxy_ids(cls, value: list[int]) -> list[int]:
-        return list(dict.fromkeys(value))
-
-
 class AccountPoolImportText(BaseModel):
     """CSV import payload for account-pool preparation.
 
@@ -50,6 +42,27 @@ class AccountPoolImportText(BaseModel):
     """
 
     text: str = Field(min_length=1, max_length=20_000_000)
+
+
+class AccountImportPreviewRow(BaseModel):
+    name: str
+    platform: str
+    group_name: str | None = None
+    proxy_id: int | None = None
+    login_configured: bool
+    password_configured: bool
+    totp_configured: bool
+    cookie_configured: bool
+    action: Literal["create", "skip"]
+    reason: str | None = None
+
+
+class AccountImportPreview(BaseModel):
+    received: int
+    creatable: int
+    skipped: int
+    groups_to_create: list[str]
+    rows: list[AccountImportPreviewRow]
 
 
 class AccountBatchProxyAssign(BaseModel):
