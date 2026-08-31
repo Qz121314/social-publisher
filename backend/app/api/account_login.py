@@ -13,7 +13,7 @@ from app.services.browser_sessions import BrowserSessionError
 from app.services.ixbrowser import IXBrowserError
 from app.services.profile_locks import ProfileBusyError
 
-router = APIRouter(prefix="/accounts", tags=["account-login"])
+router = APIRouter(tags=["account-login"])
 
 
 @router.post("/{account_id}/login/recover")
