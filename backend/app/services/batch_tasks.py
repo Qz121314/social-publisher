@@ -76,12 +76,16 @@ class BatchTaskRunner:
                     )
                 ).all()
             )
+            affected_batches: set[str] = set()
             for job in running:
                 job.status = "needs_review"
                 job.stage = "interrupted"
                 job.error_message = "后台在登录过程中重启，请先检查该账号当前登录状态。"
                 job.finished_at = now
-                self._refresh_batch(db, job.batch_id)
+                affected_batches.add(job.batch_id)
+            db.flush()
+            for batch_id in affected_batches:
+                self._refresh_batch(db, batch_id)
 
             queued_ids = list(
                 db.scalars(
@@ -223,6 +227,7 @@ class BatchTaskRunner:
         job.error_message = error_message
         job.result_json = json.dumps(result, ensure_ascii=False) if result is not None else None
         job.finished_at = utcnow()
+        db.flush()
         self._refresh_batch(db, job.batch_id)
         db.commit()
 
@@ -248,8 +253,10 @@ class BatchTaskRunner:
 
         if running or (queued and succeeded + failed + attention > 0):
             batch.status = "running"
+            batch.finished_at = None
         elif queued:
             batch.status = "queued"
+            batch.finished_at = None
         elif total > 0 and succeeded == total:
             batch.status = "succeeded"
             batch.finished_at = utcnow()
