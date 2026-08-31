@@ -170,6 +170,8 @@ SocialAccount / Account
 - `分组` 不存在时可自动创建。
 - `proxy` 可以填写 IP池 ID 或 `host:port`。
 - Cookie / Password / TOTP 直接进入 Credential Vault。
+- CSV 导入先做服务端预检；校验 Cookie、TOTP、重复账号和 IP 引用，但不向前端回显敏感内容。
+- 批量选择账号后，通过统一批量编辑一次提交分组、固定 IP 策略和启用状态，避免多接口连续修改产生半完成状态。
 - 批量导入完成时 `ix_profile_id` 可以为空。
 - 点击后续批量登录时，系统才为缺少 Runtime 的账号创建固定 iX Profile。
 
@@ -486,6 +488,8 @@ Windows 本地使用 DPAPI 加密存储。
 - **IP池真实批量健康检测、出口 IP、延迟与 best-effort 地理信息**
 - **账号池允许在没有 iX Profile 时先导入资源**
 - **账号 CSV 批量导入与统一单个 / 批量资源录入基础**
+- **账号 CSV 服务端安全预检：重复、Cookie、TOTP、分组、IP 引用；敏感值不回显**
+- **账号统一批量编辑：分组、固定 IP 策略、启用 / 停用一次提交**
 - **账号批量自动分配未占用 IP 基础**
 - **BatchTask / TaskJob 批量登录任务基础与不可变目标 Snapshot**
 - **分组一键批量登录；缺少 Runtime 时按需创建固定 iX Profile 并写入固定 SOCKS5**
@@ -502,14 +506,13 @@ Windows 本地使用 DPAPI 加密存储。
 ## 11. 接下来开发顺序
 
 ```text
-1. 账号池导入体验和批量编辑收口
-2. 运行中心展示批量登录进度
-3. 2FA / Checkpoint → 检查中心人工处理
-4. 素材池 ContentPackage
-5. 分组 → 批量发帖
-6. 账号维护任务
-7. Tauri 2 Windows Desktop Shell / Window Manager
-8. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
+1. 运行中心展示批量登录进度
+2. 2FA / Checkpoint → 检查中心人工处理
+3. 素材池 ContentPackage
+4. 分组 → 批量发帖
+5. 账号维护任务
+6. Tauri 2 Windows Desktop Shell / Window Manager
+7. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
 ```
 
 Messenger Relay 已列为正式后续能力，但当前不打断发布主线；待现有发布能力稳定后按独立 MR 阶段开发。
