@@ -5,7 +5,8 @@
   flex-wrap: wrap;
 }
 
-.account-pool-v2-row {
+.account-pool-v2-row,
+.account-pool-table .account-row--head {
   grid-template-columns: 34px minmax(180px, 1.1fr) 110px minmax(150px, .9fr) minmax(165px, 1fr) minmax(190px, 1.1fr);
 }
 
@@ -90,7 +91,8 @@
 }
 
 @media (max-width: 980px) {
-  .account-pool-v2-row {
+  .account-pool-v2-row,
+  .account-pool-table .account-row--head {
     min-width: 960px;
   }
 }
