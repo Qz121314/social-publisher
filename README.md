@@ -133,7 +133,8 @@ ProxyEndpoint
 - CSV `host,port,username,password,label`
 - 批量删除未分配 IP
 - 账号池批量自动分配 IP
-- 后续接入批量 SOCKS5 健康检测 / 出口 IP 检测
+- 批量 SOCKS5 真实健康检测、出口 IP 与延迟记录
+- 国家 / 地区元数据 best-effort 获取；定位服务失败不影响 SOCKS5 可用性判断
 
 安全规则：
 
@@ -481,10 +482,13 @@ Windows 本地使用 DPAPI 加密存储。
 - Facebook 单账号 LoginExecutor
 - Existing Session → Cookie → Password → TOTP → 人工处理
 - Facebook 登录身份确认
-- **IP池数据模型与批量导入基础**
+- **IP池数据模型、单个新增与 TXT / CSV 批量导入**
+- **IP池真实批量健康检测、出口 IP、延迟与 best-effort 地理信息**
 - **账号池允许在没有 iX Profile 时先导入资源**
-- **账号 CSV 批量导入基础**
+- **账号 CSV 批量导入与统一单个 / 批量资源录入基础**
 - **账号批量自动分配未占用 IP 基础**
+- **BatchTask / TaskJob 批量登录任务基础与不可变目标 Snapshot**
+- **分组一键批量登录；缺少 Runtime 时按需创建固定 iX Profile 并写入固定 SOCKS5**
 
 保留的高级兼容入口：
 
@@ -498,18 +502,14 @@ Windows 本地使用 DPAPI 加密存储。
 ## 11. 接下来开发顺序
 
 ```text
-1. IP池真实批量健康检测 / 出口 IP
-2. 账号池导入体验和批量编辑收口
-3. BatchTask / TaskJob 基础
-4. 选择分组 → 批量登录
-5. 批量登录时自动创建 iX Profile + 写入固定 SOCKS5
-6. 运行中心展示批量登录进度
-7. 2FA / Checkpoint → 检查中心人工处理
-8. 素材池 ContentPackage
-9. 分组 → 批量发帖
-10. 账号维护任务
-11. Tauri 2 Windows Desktop Shell / Window Manager
-12. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
+1. 账号池导入体验和批量编辑收口
+2. 运行中心展示批量登录进度
+3. 2FA / Checkpoint → 检查中心人工处理
+4. 素材池 ContentPackage
+5. 分组 → 批量发帖
+6. 账号维护任务
+7. Tauri 2 Windows Desktop Shell / Window Manager
+8. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
 ```
 
 Messenger Relay 已列为正式后续能力，但当前不打断发布主线；待现有发布能力稳定后按独立 MR 阶段开发。
