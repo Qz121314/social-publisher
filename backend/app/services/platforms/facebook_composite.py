@@ -23,15 +23,6 @@ from app.services.platforms.facebook_unicode_flow import UnicodeFacebookFlowAdap
 
 @contextmanager
 def _facebook_execution_scope(content: PlatformContent) -> Iterator[None]:
-    """Bind legacy Selenium primitives to one immutable execution snapshot.
-
-    The verified target/surface primitives historically received their content
-    through two ContextVars installed by inheritance wrappers. The composite
-    adapter owns orchestration now, so it binds both contexts explicitly. This
-    keeps actor-ID gates active without depending on MRO side effects and remains
-    safe for the existing multi-threaded Worker Pool.
-    """
-
     publish_token = _ACTIVE_PUBLISH_CONTENT.set(content)
     surface_token = _ACTIVE_SURFACE_CONTENT.set(content)
     try:
@@ -42,14 +33,7 @@ def _facebook_execution_scope(content: PlatformContent) -> Iterator[None]:
 
 
 class FacebookCompositeAdapter(PlatformAdapter):
-    """Production Facebook adapter orchestrated through explicit components.
-
-    The Selenium primitives below are intentionally the same ones that were
-    verified during the Facebook PoC. Phase 7 changes ownership and structure,
-    not browser behavior: the Registry now exposes a direct PlatformAdapter whose
-    Identity/Navigation/Composer/Text/Media/Submit/Verifier concerns are composed
-    instead of inherited through the PoC class chain.
-    """
+    """Production Facebook adapter orchestrated through explicit components."""
 
     capabilities = PlatformCapabilities(
         name="facebook",
@@ -73,8 +57,6 @@ class FacebookCompositeAdapter(PlatformAdapter):
         driver: Chrome,
         content: PlatformContent,
     ) -> dict[str, Any]:
-        """Behavior-confirm the configured target without typing or publishing."""
-
         with _facebook_execution_scope(content):
             return self.components.composer.confirm_entry(driver, content)
 
@@ -141,8 +123,6 @@ class FacebookCompositeAdapter(PlatformAdapter):
 
             emit_platform_progress("advancing", "检查 Next / Post 发布流程")
             post_button = self.components.submit.wait_ready(driver, composer)
-            # The delegated wait_ready primitive performs the original final
-            # actor-ID gate. Record the evidence only after it returns safely.
             emit_platform_progress(
                 "checking_identity",
                 "最终发布前身份检查通过",
@@ -161,11 +141,23 @@ class FacebookCompositeAdapter(PlatformAdapter):
         except WebDriverException as exc:
             raise PlatformPublishError(f"Facebook 发布前浏览器自动化失败：{exc}") from exc
 
-        # Any uncertainty after the final Post click remains needs_review. No
-        # composition component is allowed to turn this into an automatic retry.
+        # From this point forward at least one final Post click has happened. Any
+        # uncertainty must remain needs_review to prevent duplicate submissions.
         verification_started = time.monotonic()
-        emit_platform_progress("verifying", "验证 Facebook 发布结果")
+        emit_platform_progress("verifying", "检查 Facebook 发布后拦截层")
         try:
+            interstitial = self.components.submit.resolve_interstitial(
+                driver,
+                composer,
+                content,
+            )
+            if interstitial.get("handled"):
+                emit_platform_progress(
+                    "submitting",
+                    "已识别 Facebook 推广/活动提示并选择“发布原帖”",
+                    {"action": interstitial.get("action")},
+                )
+            emit_platform_progress("verifying", "验证 Facebook 发布结果")
             self.components.verifier.wait_composer_closed(driver, composer)
             verification = self.components.verifier.verify(driver, content)
             diagnostics = self.components.diagnostics.snapshot(driver, content)
@@ -173,7 +165,7 @@ class FacebookCompositeAdapter(PlatformAdapter):
             raise
         except Exception as exc:
             raise PlatformNeedsReviewError(
-                "系统已经执行最终发布点击，但验证结果前浏览器状态变得不确定。为了避免重复发帖，请人工确认 Facebook。",
+                "系统已经执行最终发布点击，但发布后页面状态不确定。为了避免重复发帖，请人工确认 Facebook。",
                 submitted=True,
             ) from exc
 
