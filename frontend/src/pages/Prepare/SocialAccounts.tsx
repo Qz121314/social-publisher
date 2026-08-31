@@ -22,6 +22,10 @@ type BrowserProfile = {
   profile_id: number
   name: string
   group_name?: string | null
+  proxy_type?: string | null
+  proxy_ip?: string | null
+  proxy_port?: string | null
+  real_ip?: string | null
   is_available: boolean
 }
 
@@ -49,7 +53,15 @@ type Channel = {
   health_status: string
 }
 
+type AccountOnboardResult = {
+  account: Account
+  profile_created: boolean
+  opened: boolean
+  open_error?: string | null
+}
+
 type Scope = 'all' | 'ungrouped' | number
+type EnvironmentMode = 'new' | 'existing'
 
 type GroupEditor = {
   mode: 'create' | 'edit'
@@ -65,6 +77,10 @@ function platformLabel(platform: string) {
   return platform
 }
 
+function profileUsesSocks5(profile: BrowserProfile) {
+  return profile.proxy_type?.toLowerCase() === 'socks5' && Boolean(profile.proxy_ip && profile.proxy_port)
+}
+
 export default function SocialAccountsPage() {
   const [groups, setGroups] = useState<AccountGroup[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -75,6 +91,7 @@ export default function SocialAccountsPage() {
   const [selected, setSelected] = useState<number[]>([])
   const [groupEditor, setGroupEditor] = useState<GroupEditor>(null)
   const [accountEditorOpen, setAccountEditorOpen] = useState(false)
+  const [environmentMode, setEnvironmentMode] = useState<EnvironmentMode>('new')
   const [authAccount, setAuthAccount] = useState<Account | null>(null)
   const [moveOpen, setMoveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -124,7 +141,9 @@ export default function SocialAccountsPage() {
       const identities = (channelsByProfile.get(account.ix_profile_id) ?? [])
         .map((channel) => channel.target_name)
         .join(' ')
-      return `${account.name} ${account.platform} ${account.browser_profile.name} ${identities}`
+      const profile = account.browser_profile
+      const network = `${profile.proxy_type ?? ''} ${profile.proxy_ip ?? ''} ${profile.proxy_port ?? ''} ${profile.real_ip ?? ''}`
+      return `${account.name} ${account.platform} ${profile.name} ${identities} ${network}`
         .toLowerCase()
         .includes(keyword)
     })
@@ -206,25 +225,54 @@ export default function SocialAccountsPage() {
     const form = new FormData(event.currentTarget)
     const name = String(form.get('name') ?? '').trim()
     const platform = String(form.get('platform') ?? 'facebook')
-    const profileId = Number(form.get('ix_profile_id'))
     const groupValue = String(form.get('group_id') ?? '')
-    if (!name || !Number.isFinite(profileId)) return
+    const existingProfileValue = String(form.get('ix_profile_id') ?? '')
+    const proxyEnabled = form.get('proxy_enabled') === 'on'
+    const proxyHost = String(form.get('proxy_host') ?? '').trim()
+    const proxyPortValue = String(form.get('proxy_port') ?? '').trim()
+    if (!name) return
+    if (environmentMode === 'existing' && !existingProfileValue) {
+      setMessage('请选择要绑定的已有 iX 环境。')
+      return
+    }
+    if (environmentMode === 'new' && proxyEnabled && (!proxyHost || !proxyPortValue)) {
+      setMessage('启用 SOCKS5 后必须填写 Host 和 Port。')
+      return
+    }
 
     setBusy(true)
     setMessage(null)
     try {
-      await api('/api/accounts', {
+      const result = await api<AccountOnboardResult>('/api/accounts/onboard', {
         method: 'POST',
         body: JSON.stringify({
           name,
           platform,
-          ix_profile_id: profileId,
           group_id: groupValue ? Number(groupValue) : null,
+          environment_mode: environmentMode,
+          ix_profile_id: environmentMode === 'existing' ? Number(existingProfileValue) : null,
+          profile_name: environmentMode === 'new' ? String(form.get('profile_name') ?? '').trim() || name : null,
+          proxy: {
+            enabled: environmentMode === 'new' && proxyEnabled,
+            proxy_type: 'socks5',
+            host: environmentMode === 'new' && proxyEnabled ? proxyHost : null,
+            port: environmentMode === 'new' && proxyEnabled ? Number(proxyPortValue) : null,
+            username: environmentMode === 'new' && proxyEnabled ? String(form.get('proxy_username') ?? '').trim() || null : null,
+            password: environmentMode === 'new' && proxyEnabled ? String(form.get('proxy_password') ?? '') || null : null,
+          },
+          open_after_create: form.get('open_after_create') === 'on',
         }),
       })
       await load()
       setAccountEditorOpen(false)
-      setMessage(`账号“${name}”已加入工作台。`)
+      setEnvironmentMode('new')
+      if (result.open_error) {
+        setMessage(`账号“${name}”已创建${result.profile_created ? '并建立独立 iX 环境' : ''}，但浏览器自动打开失败。不要重复创建账号；可在浏览器环境中再次打开。 ${result.open_error}`)
+      } else if (result.opened) {
+        setMessage(`账号“${name}”已创建，真实 iXBrowser 窗口已打开。现在可直接在该窗口完成 ${platformLabel(platform)} 登录。`)
+      } else {
+        setMessage(`账号“${name}”已创建${result.profile_created ? '，独立 iX 环境已建立' : ''}。`)
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -266,11 +314,11 @@ export default function SocialAccountsPage() {
     <main className="prepare-workspace social-account-workspace">
       <WorkspaceHeader
         title="社交账号"
-        description="用业务分组组织账号。分组将直接成为批量登录、检查和发布任务的选择单位。"
+        description="添加账号时直接创建 iX 环境、配置 SOCKS5 并打开真实浏览器；已有 iX 环境仍可作为高级导入方式绑定。"
         actions={(
           <>
             <Button onClick={() => setGroupEditor({ mode: 'create' })}><PlusIcon />新建分组</Button>
-            <Button variant="primary" onClick={() => setAccountEditorOpen(true)}><PlusIcon />添加账号</Button>
+            <Button variant="primary" onClick={() => { setEnvironmentMode('new'); setAccountEditorOpen(true) }}><PlusIcon />添加账号</Button>
           </>
         )}
       />
@@ -319,9 +367,9 @@ export default function SocialAccountsPage() {
           <div className="account-toolbar">
             <div className="environment-search account-search">
               <SearchIcon />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号、环境或发布身份…" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号、iX 环境、SOCKS5、出口 IP 或发布身份…" />
             </div>
-            <span className="account-toolbar-note">Facebook 单账号恢复登录已接入真实 iX 环境；批量执行将在单账号闭环验证后复用同一引擎。</span>
+            <span className="account-toolbar-note">账号 → iX 环境 → SOCKS5 → 真实窗口登录已经合并成一条准备链路。</span>
           </div>
 
           {selected.length > 0 && (
@@ -340,14 +388,17 @@ export default function SocialAccountsPage() {
               <div>账号</div>
               <div>分组</div>
               <div>浏览器环境</div>
+              <div>网络 / IP</div>
               <div>发布身份</div>
               <div>登录</div>
             </div>
 
             {visibleAccounts.length === 0 ? (
-              <EmptyState title="当前没有账号" description="可以添加账号并绑定已有 iX 浏览器环境，或切换到其他分组。" />
+              <EmptyState title="当前没有账号" description="点击“添加账号”即可同时创建独立 iX 环境、配置 SOCKS5 并打开真实浏览器。" />
             ) : visibleAccounts.map((account) => {
               const accountChannels = (channelsByProfile.get(account.ix_profile_id) ?? []).filter((channel) => channel.platform === account.platform && channel.enabled)
+              const profile = account.browser_profile
+              const socks5 = profileUsesSocks5(profile)
               return (
                 <div className="account-row" role="row" key={account.id}>
                   <div><input type="checkbox" checked={selectedSet.has(account.id)} onChange={() => toggleAccount(account.id)} aria-label={`选择 ${account.name}`} /></div>
@@ -356,7 +407,12 @@ export default function SocialAccountsPage() {
                     <div><strong>{account.name}</strong><span>{platformLabel(account.platform)} · 账号 #{account.id}</span></div>
                   </div>
                   <div><span className="account-group-name">{account.group?.name || '未分组'}</span></div>
-                  <div className="account-env-cell"><strong>{account.browser_profile.name}</strong><span>iX #{account.ix_profile_id}</span></div>
+                  <div className="account-env-cell"><strong>{profile.name}</strong><span>iX #{account.ix_profile_id}</span></div>
+                  <div className="account-network-cell">
+                    <div><StatusChip tone={socks5 ? 'success' : 'neutral'}>{socks5 ? 'SOCKS5' : '直连'}</StatusChip></div>
+                    {socks5 && <strong>{profile.proxy_ip}:{profile.proxy_port}</strong>}
+                    <span>{profile.real_ip ? `出口 ${profile.real_ip}` : '出口 IP 未检测'}</span>
+                  </div>
                   <div className="account-identity-cell">
                     {accountChannels.length === 0 ? <span>未配置</span> : accountChannels.slice(0, 2).map((channel) => <span key={channel.id}>{channel.target_name}</span>)}
                     {accountChannels.length > 2 && <small>+{accountChannels.length - 2}</small>}
@@ -404,17 +460,55 @@ export default function SocialAccountsPage() {
 
       {accountEditorOpen && (
         <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !busy && setAccountEditorOpen(false)}>
-          <div className="sp-form-dialog account-dialog" role="dialog" aria-modal="true" aria-label="添加社交账号" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="sp-form-dialog account-dialog account-onboard-dialog" role="dialog" aria-modal="true" aria-label="添加社交账号" onMouseDown={(event) => event.stopPropagation()}>
             <form onSubmit={createAccount}>
-              <header><div><span>社交账号</span><h2>添加账号</h2></div><button type="button" onClick={() => setAccountEditorOpen(false)} aria-label="关闭">×</button></header>
-              <div className="account-dialog-body">
-                <label><span>账号名称</span><input name="name" placeholder="例如 John / Store A" maxLength={255} autoFocus required /></label>
-                <label><span>平台</span><select name="platform" defaultValue="facebook"><option value="facebook">Facebook</option><option value="instagram">Instagram</option></select></label>
-                <label><span>浏览器环境</span><select name="ix_profile_id" defaultValue="" required><option value="" disabled>选择固定 iX 环境</option>{profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · iX #{profile.profile_id}</option>)}</select></label>
-                <label><span>账号分组</span><select name="group_id" defaultValue={typeof scope === 'number' ? String(scope) : ''}><option value="">未分组</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-                <div className="account-dialog-hint">这里只建立账号与 iX 环境的稳定绑定。Cookie、密码和 TOTP 动态验证码密钥不会写入普通 SQLite。</div>
+              <header><div><span>账号 + iX 环境</span><h2>添加账号</h2></div><button type="button" onClick={() => setAccountEditorOpen(false)} aria-label="关闭">×</button></header>
+              <div className="account-dialog-body account-onboard-body">
+                <section className="account-onboard-section">
+                  <div className="account-onboard-section-title"><strong>账号</strong><span>工作台业务账号</span></div>
+                  <div className="account-onboard-grid">
+                    <label><span>账号名称</span><input name="name" placeholder="例如 John / Store A" maxLength={255} autoFocus required /></label>
+                    <label><span>平台</span><select name="platform" defaultValue="facebook"><option value="facebook">Facebook</option><option value="instagram">Instagram</option></select></label>
+                    <label><span>账号分组</span><select name="group_id" defaultValue={typeof scope === 'number' ? String(scope) : ''}><option value="">未分组</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                  </div>
+                </section>
+
+                <section className="account-onboard-section">
+                  <div className="account-onboard-section-title"><strong>iX 浏览器环境</strong><span>实际登录和发布都发生在这里</span></div>
+                  <div className="account-onboard-mode">
+                    <button type="button" className={environmentMode === 'new' ? 'is-active' : ''} onClick={() => setEnvironmentMode('new')}>新建独立环境</button>
+                    <button type="button" className={environmentMode === 'existing' ? 'is-active' : ''} onClick={() => setEnvironmentMode('existing')}>绑定已有环境</button>
+                  </div>
+
+                  {environmentMode === 'new' ? (
+                    <>
+                      <label><span>环境名称</span><input name="profile_name" placeholder="默认使用账号名称" maxLength={255} /></label>
+                      <div className="account-onboard-hint">默认路径就是 iXBrowser 的“新建窗口/环境”，只是由 Social Publisher 通过 Local API 完成，不需要再去 iX 管理界面重复创建。</div>
+                    </>
+                  ) : (
+                    <label><span>已有 iX 环境</span><select name="ix_profile_id" defaultValue=""><option value="">选择固定 iX 环境</option>{profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · iX #{profile.profile_id}</option>)}</select></label>
+                  )}
+                </section>
+
+                {environmentMode === 'new' && (
+                  <section className="account-onboard-section">
+                    <div className="account-onboard-section-title"><strong>SOCKS5</strong><span>直接写入新建的 iX Profile</span></div>
+                    <label className="account-onboard-check"><input type="checkbox" name="proxy_enabled" /><span>为这个账号使用 SOCKS5</span></label>
+                    <div className="account-onboard-grid account-onboard-proxy-grid">
+                      <label><span>Host</span><input name="proxy_host" placeholder="代理主机" /></label>
+                      <label><span>Port</span><input name="proxy_port" type="number" min="1" max="65535" placeholder="1080" /></label>
+                      <label><span>Username</span><input name="proxy_username" autoComplete="off" placeholder="可选" /></label>
+                      <label><span>Password</span><input name="proxy_password" type="password" autoComplete="new-password" placeholder="可选" /></label>
+                    </div>
+                    <div className="account-onboard-hint">代理用户名和密码只提交给本机 iXBrowser Local API；Social Publisher 普通 SQLite 只镜像 SOCKS5 类型、Host、Port 和出口 IP。</div>
+                  </section>
+                )}
+
+                <section className="account-onboard-section">
+                  <label className="account-onboard-check"><input type="checkbox" name="open_after_create" defaultChecked /><span><strong>创建后立即打开真实 iXBrowser 窗口</strong><small>打开对应 Facebook / Instagram 页面，在这个真实环境里完成登录。后续“恢复登录”也继续复用同一个窗口和环境。</small></span></label>
+                </section>
               </div>
-              <footer><Button type="button" onClick={() => setAccountEditorOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy || profiles.length === 0}>{busy ? '创建中…' : '添加账号'}</Button></footer>
+              <footer><Button type="button" onClick={() => setAccountEditorOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy || (environmentMode === 'existing' && profiles.length === 0)}>{busy ? '创建中…' : '创建账号并打开'}</Button></footer>
             </form>
           </div>
         </div>
