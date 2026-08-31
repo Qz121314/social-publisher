@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api, formatDateTime } from '../../app/api'
-import { BrowserIcon, SearchIcon } from '../../ui/icons'
+import { BrowserIcon, PlusIcon, SearchIcon } from '../../ui/icons'
 import { Button, EmptyState, StatusChip, WorkspaceHeader } from '../../ui/components'
 import PrepareNav from './PrepareNav'
 
@@ -47,13 +47,30 @@ type ProfileLock = {
 
 type BrowserSessionResponse = { items: BrowserSession[]; count: number }
 type ProfileLockResponse = { items: ProfileLock[]; count: number }
+type CreateProfileResponse = {
+  status: 'created'
+  profile_id?: number | null
+  name: string
+  site_url: string
+  synced: boolean
+  opened: boolean
+  sync_error?: string | null
+  open_error?: string | null
+}
 type Filter = 'all' | 'open' | 'available' | 'attention'
+type StartPage = 'facebook' | 'instagram' | 'blank'
 
 const filters: Array<{ value: Filter; label: string }> = [
   { value: 'all', label: '全部' },
   { value: 'open', label: '已打开' },
   { value: 'available', label: '可用' },
   { value: 'attention', label: '需要检查' },
+]
+
+const startPages: Array<{ value: StartPage; label: string; url: string; description: string }> = [
+  { value: 'facebook', label: 'Facebook', url: 'https://www.facebook.com/', description: '创建后直接打开 Facebook' },
+  { value: 'instagram', label: 'Instagram', url: 'https://www.instagram.com/', description: '创建后直接打开 Instagram' },
+  { value: 'blank', label: '空白页', url: 'chrome://newtab', description: '仅创建基础浏览器环境' },
 ]
 
 function platformName(value: string) {
@@ -78,6 +95,11 @@ export default function BrowserEnvironmentsPage() {
   const [batchBusy, setBatchBusy] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState('')
+  const [startPage, setStartPage] = useState<StartPage>('facebook')
+  const [openAfterCreate, setOpenAfterCreate] = useState(true)
+  const [creating, setCreating] = useState(false)
 
   const load = async () => {
     try {
@@ -165,6 +187,47 @@ export default function BrowserEnvironmentsPage() {
     }
   }
 
+  const createProfile = async (event: FormEvent) => {
+    event.preventDefault()
+    const name = createName.trim()
+    if (!name) return
+
+    const selectedStartPage = startPages.find((item) => item.value === startPage) ?? startPages[0]
+    setCreating(true)
+    setMessage(null)
+    try {
+      const result = await api<CreateProfileResponse>('/api/ixbrowser/profiles', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          site_url: selectedStartPage.url,
+          open_after_create: openAfterCreate,
+        }),
+      })
+
+      await load()
+      setCreateOpen(false)
+      setCreateName('')
+      setStartPage('facebook')
+      setOpenAfterCreate(true)
+
+      const profileLabel = result.profile_id ? `iX #${result.profile_id}` : result.name
+      if (!result.synced) {
+        setMessage(`${profileLabel} 已在 iXBrowser 创建，但本地同步未完成。请点击“同步 iX 环境”重新同步。${result.sync_error ? ` ${result.sync_error}` : ''}`)
+      } else if (result.open_error) {
+        setMessage(`${profileLabel} 已创建，但自动打开失败。环境没有重复创建；可以在列表中再次点击“打开”。 ${result.open_error}`)
+      } else if (result.opened) {
+        setMessage(`${profileLabel} 已创建并打开。`)
+      } else {
+        setMessage(`${profileLabel} 已创建。`)
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const runProfileAction = async (profileId: number, action: 'open' | 'probe' | 'close') => {
     setBusyProfile(profileId)
     setMessage(null)
@@ -218,11 +281,12 @@ export default function BrowserEnvironmentsPage() {
     <main className="prepare-workspace">
       <WorkspaceHeader
         title="浏览器环境"
-        description="管理 iXBrowser Profile 与当前本地会话。账号身份属于社交账号层，Proxy / IP 将由独立网络服务补齐。"
+        description="Social Publisher 负责管理环境；iXBrowser 负责提供真实指纹浏览器窗口。"
         actions={(
           <>
             <Button onClick={load}>刷新</Button>
-            <Button variant="primary" onClick={syncProfiles} disabled={syncing}>{syncing ? '同步中…' : '同步 iX 环境'}</Button>
+            <Button onClick={syncProfiles} disabled={syncing}>{syncing ? '同步中…' : '同步 iX 环境'}</Button>
+            <Button variant="primary" onClick={() => setCreateOpen(true)}><PlusIcon />新建环境</Button>
           </>
         )}
       />
@@ -274,7 +338,7 @@ export default function BrowserEnvironmentsPage() {
           </div>
 
           {visibleProfiles.length === 0 ? (
-            <EmptyState title="没有匹配的浏览器环境" description="可以调整筛选条件，或先启动 iXBrowser 后同步环境。" />
+            <EmptyState title="没有匹配的浏览器环境" description="可以新建环境，或启动 iXBrowser 后同步已有环境。" />
           ) : visibleProfiles.map((profile) => {
             const session = sessionByProfile.get(profile.profile_id)
             const lock = lockByProfile.get(profile.profile_id)
@@ -316,7 +380,7 @@ export default function BrowserEnvironmentsPage() {
                 </div>
                 <div className="environment-network-cell">
                   <StatusChip tone="neutral">待接入</StatusChip>
-                  <span>不读取或猜测 iX 原始 Proxy 凭据</span>
+                  <span>Proxy / Exit IP 将通过独立网络边界接入</span>
                 </div>
                 <div className="environment-date-cell">
                   <strong>{profile.is_available ? '可用' : '未发现'}</strong>
@@ -337,6 +401,55 @@ export default function BrowserEnvironmentsPage() {
           })}
         </div>
       </section>
+
+      {createOpen && (
+        <div className="environment-create-backdrop" onMouseDown={() => !creating && setCreateOpen(false)}>
+          <aside className="environment-create-drawer" role="dialog" aria-modal="true" aria-labelledby="create-environment-title" onMouseDown={(event) => event.stopPropagation()}>
+            <form onSubmit={createProfile}>
+              <header className="environment-create-header">
+                <div>
+                  <h2 id="create-environment-title">新建浏览器环境</h2>
+                  <p>环境由 iXBrowser 创建并长期复用。Social Publisher 不自行创建 Chromium。</p>
+                </div>
+                <button type="button" className="environment-create-close" onClick={() => setCreateOpen(false)} disabled={creating} aria-label="关闭">×</button>
+              </header>
+
+              <div className="environment-create-body">
+                <label className="environment-field">
+                  <span>环境名称</span>
+                  <input autoFocus value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="例如 Store-A-017" maxLength={255} required />
+                  <small>用于工作台和 iXBrowser 中识别该环境。创建后保持长期复用。</small>
+                </label>
+
+                <fieldset className="environment-start-page">
+                  <legend>启动页面</legend>
+                  {startPages.map((item) => (
+                    <label key={item.value} className={startPage === item.value ? 'is-selected' : ''}>
+                      <input type="radio" name="start-page" value={item.value} checked={startPage === item.value} onChange={() => setStartPage(item.value)} />
+                      <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                    </label>
+                  ))}
+                </fieldset>
+
+                <div className="environment-create-note">
+                  <strong>指纹配置</strong>
+                  <span>当前使用 iXBrowser 默认环境配置，不在工作台生成或伪造指纹参数。Proxy、Cookie、账号凭据会在各自的安全模块中配置。</span>
+                </div>
+
+                <label className="environment-create-toggle">
+                  <input type="checkbox" checked={openAfterCreate} onChange={(event) => setOpenAfterCreate(event.target.checked)} />
+                  <span><strong>创建后立即打开</strong><small>由 iXBrowser 打开真实 Profile 窗口，并附加到本地 Runtime。</small></span>
+                </label>
+              </div>
+
+              <footer className="environment-create-footer">
+                <Button type="button" onClick={() => setCreateOpen(false)} disabled={creating}>取消</Button>
+                <Button variant="primary" type="submit" disabled={creating || !createName.trim()}>{creating ? '创建中…' : openAfterCreate ? '创建并打开' : '创建环境'}</Button>
+              </footer>
+            </form>
+          </aside>
+        </div>
+      )}
     </main>
   )
 }
