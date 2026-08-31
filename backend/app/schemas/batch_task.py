@@ -50,4 +50,4 @@ class BatchTaskRead(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
-    jobs: list[TaskJobRead] = []
+    jobs: list[TaskJobRead] = Field(default_factory=list)
