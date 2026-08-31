@@ -6,3 +6,4 @@ apscheduler>=3.10,<4.0
 selenium>=4.20,<5.0
 ixbrowser-local-api>=1.0
 python-multipart>=0.0.9
+httpx[socks]>=0.28,<1.0

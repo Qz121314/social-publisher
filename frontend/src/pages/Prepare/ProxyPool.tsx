@@ -18,6 +18,7 @@ type ProxyEndpoint = {
   country?: string | null
   region?: string | null
   latency_ms?: number | null
+  last_checked_at?: string | null
   assigned_count: number
 }
 
@@ -27,11 +28,24 @@ type ImportResult = {
   skipped: number
 }
 
+type HealthCheckResult = {
+  checked: number
+  healthy: number
+  error: number
+}
+
 function statusView(status: string) {
   if (['healthy', 'ok'].includes(status)) return { label: '正常', tone: 'success' as const }
   if (status === 'error') return { label: '异常', tone: 'danger' as const }
   if (status === 'checking') return { label: '检测中', tone: 'info' as const }
   return { label: '待检测', tone: 'neutral' as const }
+}
+
+function formatCheckedAt(value?: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleString('zh-CN', { hour12: false })
 }
 
 export default function ProxyPoolPage() {
@@ -42,6 +56,7 @@ export default function ProxyPoolPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [checkingIds, setCheckingIds] = useState<number[]>([])
   const [message, setMessage] = useState<string | null>(null)
 
   const load = async () => {
@@ -65,6 +80,7 @@ export default function ProxyPoolPage() {
   const allSelected = visible.length > 0 && visible.every((item) => selectedSet.has(item.id))
   const assignedCount = items.filter((item) => item.assigned_count > 0).length
   const errorCount = items.filter((item) => item.status === 'error').length
+  const checkBusy = checkingIds.length > 0
 
   const toggleAll = () => {
     if (allSelected) {
@@ -77,7 +93,7 @@ export default function ProxyPoolPage() {
 
   const createProxy = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (busy) return
+    if (busy || checkBusy) return
     const form = new FormData(event.currentTarget)
     setBusy(true)
     setMessage(null)
@@ -104,7 +120,7 @@ export default function ProxyPoolPage() {
 
   const importPool = async (event: FormEvent) => {
     event.preventDefault()
-    if (!importText.trim()) return
+    if (!importText.trim() || checkBusy) return
     setBusy(true)
     setMessage(null)
     try {
@@ -123,8 +139,39 @@ export default function ProxyPoolPage() {
     }
   }
 
+  const checkPool = async (ids: number[]) => {
+    const uniqueIds = Array.from(new Set(ids))
+    if (uniqueIds.length === 0 || busy || checkBusy) return
+    setCheckingIds(uniqueIds)
+    setMessage(null)
+    const checkingSet = new Set(uniqueIds)
+    setItems((current) => current.map((item) => checkingSet.has(item.id) ? { ...item, status: 'checking' } : item))
+    try {
+      let checked = 0
+      let healthy = 0
+      let errorCountResult = 0
+      for (let offset = 0; offset < uniqueIds.length; offset += 200) {
+        const batch = uniqueIds.slice(offset, offset + 200)
+        const result = await api<HealthCheckResult>('/api/proxy-pool/check', {
+          method: 'POST',
+          body: JSON.stringify({ proxy_ids: batch }),
+        })
+        checked += result.checked
+        healthy += result.healthy
+        errorCountResult += result.error
+      }
+      await load()
+      setMessage(`IP检测完成：共 ${checked} 条，正常 ${healthy}，异常 ${errorCountResult}。`)
+    } catch (error) {
+      await load()
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCheckingIds([])
+    }
+  }
+
   const deleteSelected = async () => {
-    if (selected.length === 0 || busy) return
+    if (selected.length === 0 || busy || checkBusy) return
     setBusy(true)
     setMessage(null)
     try {
@@ -152,7 +199,7 @@ export default function ProxyPoolPage() {
       <WorkspaceHeader
         title="IP池"
         description="SOCKS5 统一进入 IP池。可以单个新增，也可以 TXT / CSV 批量导入；账号绑定后长期复用固定 IP。"
-        actions={<><Button onClick={() => setCreateOpen(true)}>+ 新建 IP</Button><Button variant="primary" onClick={() => setImportOpen(true)}>批量导入</Button></>}
+        actions={<><Button onClick={() => checkPool(items.map((item) => item.id))} disabled={items.length === 0 || busy || checkBusy}>{checkBusy ? `检测中 ${checkingIds.length}` : '检测全部'}</Button><Button onClick={() => setCreateOpen(true)} disabled={checkBusy}>+ 新建 IP</Button><Button variant="primary" onClick={() => setImportOpen(true)} disabled={checkBusy}>批量导入</Button></>}
       />
       <PrepareNav />
 
@@ -168,14 +215,14 @@ export default function ProxyPoolPage() {
       <section className="resource-pool-shell">
         <div className="resource-pool-toolbar">
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Host、出口 IP、标签或 ID…" />
-          <span>单个新增和批量导入使用同一个 IP池；不会生成两套数据。</span>
+          <span>健康检测通过真实 SOCKS5 出网获取出口 IP；定位信息失败不会影响可用性判定。</span>
         </div>
 
         {selected.length > 0 && (
           <div className="environment-selection-bar">
             <strong>已选择 {selected.length} 条 IP</strong>
-            <span>已绑定账号的 IP 不允许直接删除。</span>
-            <div><Button variant="danger" onClick={deleteSelected} disabled={busy}>删除所选</Button></div>
+            <span>可以先检测所选；已绑定账号的 IP 不允许直接删除。</span>
+            <div><Button onClick={() => checkPool(selected)} disabled={busy || checkBusy}>检测所选</Button><Button variant="danger" onClick={deleteSelected} disabled={busy || checkBusy}>删除所选</Button></div>
           </div>
         )}
 
@@ -192,12 +239,13 @@ export default function ProxyPoolPage() {
             <EmptyState title="IP池为空" description="可以新建单个 SOCKS5，也可以直接批量导入。" />
           ) : visible.map((item) => {
             const status = statusView(item.status)
+            const checkedAt = formatCheckedAt(item.last_checked_at)
             return (
               <div className="resource-pool-row" role="row" key={item.id}>
                 <div><input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} aria-label={`选择 IP ${item.id}`} /></div>
                 <div className="resource-pool-endpoint"><strong>{item.host}:{item.port}</strong><span>IP #{item.id}{item.label ? ` · ${item.label}` : ''}</span></div>
                 <div><StatusChip tone={item.username_configured ? 'info' : 'neutral'}>{item.username_configured ? '账号密码认证' : '无认证'}</StatusChip></div>
-                <div><StatusChip tone={status.tone}>{status.label}</StatusChip>{item.latency_ms != null && <small>{item.latency_ms} ms</small>}</div>
+                <div><StatusChip tone={status.tone}>{status.label}</StatusChip>{item.latency_ms != null && <small>{item.latency_ms} ms</small>}{checkedAt && <span>{checkedAt}</span>}</div>
                 <div><strong>{item.exit_ip || '未检测'}</strong><span>{[item.country, item.region].filter(Boolean).join(' · ') || '—'}</span></div>
                 <div><StatusChip tone={item.assigned_count > 0 ? 'success' : 'neutral'}>{item.assigned_count > 0 ? `已分配 ${item.assigned_count}` : '未分配'}</StatusChip></div>
               </div>

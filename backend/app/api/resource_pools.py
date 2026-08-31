@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ from app.schemas.resource_pool import (
     AccountPoolImportText,
     ProxyBatchDelete,
     ProxyEndpointRead,
+    ProxyHealthCheckRequest,
     ProxyImportText,
 )
 from app.services.cookie_session import CookieSessionError, normalize_cookie_payload
@@ -28,6 +30,7 @@ from app.services.credential_vault import (
     proxy_secret_reference,
 )
 from app.services.login_engine import normalize_totp_secret
+from app.services.proxy_health import ProxyHealthResult, check_socks5_proxy
 from app.services.resource_pool import (
     AccountImportRow,
     ResourcePoolImportError,
@@ -115,6 +118,96 @@ def import_proxy_pool(payload: ProxyImportText, db: Session = Depends(get_db)) -
         "received": len(rows),
         "created": len(created_ids),
         "skipped": skipped,
+    }
+
+
+@router.post("/proxy-pool/check")
+def check_proxy_pool(
+    payload: ProxyHealthCheckRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    ids = payload.proxy_ids
+    endpoints = list(db.scalars(select(ProxyEndpoint).where(ProxyEndpoint.id.in_(ids))).all())
+    endpoint_by_id = {item.id: item for item in endpoints}
+    missing = [item for item in ids if item not in endpoint_by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"未找到 IP：{', '.join(map(str, missing[:10]))}")
+
+    results: dict[int, ProxyHealthResult] = {}
+    prepared: dict[int, tuple[str, int, str | None, str | None]] = {}
+    for endpoint in endpoints:
+        try:
+            username = (
+                credential_vault.get_text(proxy_secret_reference(endpoint.id, "username"))
+                if endpoint.username_configured
+                else None
+            )
+            password = (
+                credential_vault.get_text(proxy_secret_reference(endpoint.id, "password"))
+                if endpoint.password_configured
+                else None
+            )
+            prepared[endpoint.id] = (endpoint.host, endpoint.port, username, password)
+        except CredentialVaultError:
+            results[endpoint.id] = ProxyHealthResult(status="error", error_code="credential")
+
+    if prepared:
+        workers = min(12, len(prepared))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="proxy-health") as executor:
+            futures = {
+                executor.submit(
+                    check_socks5_proxy,
+                    host=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                ): proxy_id
+                for proxy_id, (host, port, username, password) in prepared.items()
+            }
+            for future in as_completed(futures):
+                proxy_id = futures[future]
+                try:
+                    results[proxy_id] = future.result()
+                except Exception:
+                    results[proxy_id] = ProxyHealthResult(status="error", error_code="internal")
+
+    checked_at = utcnow()
+    response_items: list[dict[str, object]] = []
+    for proxy_id in ids:
+        endpoint = endpoint_by_id[proxy_id]
+        result = results.get(proxy_id, ProxyHealthResult(status="error", error_code="internal"))
+        endpoint.status = result.status
+        endpoint.last_checked_at = checked_at
+        if result.status == "healthy":
+            endpoint.exit_ip = result.exit_ip
+            endpoint.country = result.country
+            endpoint.region = result.region
+            endpoint.latency_ms = result.latency_ms
+        else:
+            endpoint.exit_ip = None
+            endpoint.country = None
+            endpoint.region = None
+            endpoint.latency_ms = None
+        response_items.append(
+            {
+                "proxy_id": endpoint.id,
+                "status": result.status,
+                "exit_ip": result.exit_ip,
+                "country": result.country,
+                "region": result.region,
+                "latency_ms": result.latency_ms,
+                "error_code": result.error_code,
+            }
+        )
+
+    db.commit()
+    healthy = sum(1 for item in response_items if item["status"] == "healthy")
+    return {
+        "status": "ok",
+        "checked": len(response_items),
+        "healthy": healthy,
+        "error": len(response_items) - healthy,
+        "results": response_items,
     }
 
 
