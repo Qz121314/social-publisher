@@ -6,7 +6,7 @@ import AdminSidebar from './sidebar'
 
 function workspaceName(pathname: string) {
   if (pathname === '/') return '工作台'
-  if (pathname.startsWith('/accounts') || pathname.startsWith('/assets') || pathname.startsWith('/flows')) return '准备'
+  if (pathname.startsWith('/prepare') || pathname.startsWith('/accounts') || pathname.startsWith('/assets') || pathname.startsWith('/flows')) return '准备'
   if (pathname.startsWith('/publish') || pathname.startsWith('/plans')) return '发布'
   if (pathname.startsWith('/tasks')) return '运行'
   if (pathname.startsWith('/review')) return '检查'
