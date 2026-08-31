@@ -9,6 +9,10 @@ type BrowserProfile = {
   profile_id: number
   name: string
   group_name?: string | null
+  proxy_type?: string | null
+  proxy_ip?: string | null
+  proxy_port?: string | null
+  real_ip?: string | null
   is_available: boolean
   last_seen_at: string
 }
@@ -52,6 +56,7 @@ type CreateProfileResponse = {
   profile_id?: number | null
   name: string
   site_url: string
+  proxy_configured?: boolean
   synced: boolean
   opened: boolean
   sync_error?: string | null
@@ -83,6 +88,10 @@ function channelHealthy(channel: Channel) {
   return channel.enabled && ['healthy', 'ok', 'running'].includes(channel.health_status)
 }
 
+function hasSocks5(profile: BrowserProfile) {
+  return profile.proxy_type?.toLowerCase() === 'socks5' && Boolean(profile.proxy_ip && profile.proxy_port)
+}
+
 export default function BrowserEnvironmentsPage() {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
@@ -100,6 +109,8 @@ export default function BrowserEnvironmentsPage() {
   const [startPage, setStartPage] = useState<StartPage>('facebook')
   const [openAfterCreate, setOpenAfterCreate] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [proxyEditor, setProxyEditor] = useState<BrowserProfile | null>(null)
+  const [proxyBusy, setProxyBusy] = useState(false)
 
   const load = async () => {
     try {
@@ -151,7 +162,8 @@ export default function BrowserEnvironmentsPage() {
 
       if (!keyword) return true
       const channelText = profileChannels.map((channel) => `${channel.platform} ${channel.target_name}`).join(' ')
-      return `${profile.name} ${profile.group_name ?? ''} ${profile.profile_id} ${channelText}`.toLowerCase().includes(keyword)
+      const networkText = `${profile.proxy_type ?? ''} ${profile.proxy_ip ?? ''} ${profile.proxy_port ?? ''} ${profile.real_ip ?? ''}`
+      return `${profile.name} ${profile.group_name ?? ''} ${profile.profile_id} ${channelText} ${networkText}`.toLowerCase().includes(keyword)
     })
   }, [profiles, search, filter, sessionByProfile, lockByProfile, channelsByProfile])
 
@@ -187,10 +199,19 @@ export default function BrowserEnvironmentsPage() {
     }
   }
 
-  const createProfile = async (event: FormEvent) => {
+  const createProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const name = createName.trim()
     if (!name) return
+
+    const form = new FormData(event.currentTarget)
+    const proxyEnabled = form.get('proxy_enabled') === 'on'
+    const proxyHost = String(form.get('proxy_host') ?? '').trim()
+    const proxyPortValue = String(form.get('proxy_port') ?? '').trim()
+    if (proxyEnabled && (!proxyHost || !proxyPortValue)) {
+      setMessage('启用 SOCKS5 后必须填写 Host 和 Port。')
+      return
+    }
 
     const selectedStartPage = startPages.find((item) => item.value === startPage) ?? startPages[0]
     setCreating(true)
@@ -201,6 +222,14 @@ export default function BrowserEnvironmentsPage() {
         body: JSON.stringify({
           name,
           site_url: selectedStartPage.url,
+          proxy: {
+            enabled: proxyEnabled,
+            proxy_type: 'socks5',
+            host: proxyHost || null,
+            port: proxyPortValue ? Number(proxyPortValue) : null,
+            username: String(form.get('proxy_username') ?? '').trim() || null,
+            password: String(form.get('proxy_password') ?? '') || null,
+          },
           open_after_create: openAfterCreate,
         }),
       })
@@ -217,14 +246,51 @@ export default function BrowserEnvironmentsPage() {
       } else if (result.open_error) {
         setMessage(`${profileLabel} 已创建，但自动打开失败。环境没有重复创建；可以在列表中再次点击“打开”。 ${result.open_error}`)
       } else if (result.opened) {
-        setMessage(`${profileLabel} 已创建并打开。`)
+        setMessage(`${profileLabel} 已创建并打开${result.proxy_configured ? '，SOCKS5 已写入该 iX 环境' : ''}。`)
       } else {
-        setMessage(`${profileLabel} 已创建。`)
+        setMessage(`${profileLabel} 已创建${result.proxy_configured ? '，SOCKS5 已写入该 iX 环境' : ''}。`)
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
       setCreating(false)
+    }
+  }
+
+  const saveProxy = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!proxyEditor || proxyBusy) return
+    const form = new FormData(event.currentTarget)
+    const enabled = String(form.get('network_mode') ?? 'socks5') === 'socks5'
+    const host = String(form.get('proxy_host') ?? '').trim()
+    const portValue = String(form.get('proxy_port') ?? '').trim()
+    if (enabled && (!host || !portValue)) {
+      setMessage('SOCKS5 需要同时填写 Host 和 Port。')
+      return
+    }
+
+    setProxyBusy(true)
+    setMessage(null)
+    try {
+      await api(`/api/browser-profiles/${proxyEditor.profile_id}/proxy`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          enabled,
+          host: enabled ? host : null,
+          port: enabled ? Number(portValue) : null,
+          username: enabled ? String(form.get('proxy_username') ?? '').trim() || null : null,
+          password: enabled ? String(form.get('proxy_password') ?? '') || null : null,
+        }),
+      })
+      await load()
+      setProxyEditor(null)
+      setMessage(enabled
+        ? `iX #${proxyEditor.profile_id} 的 SOCKS5 已更新。代理用户名和密码不会写入 Social Publisher SQLite。`
+        : `iX #${proxyEditor.profile_id} 已切换为直连。`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setProxyBusy(false)
     }
   }
 
@@ -274,14 +340,14 @@ export default function BrowserEnvironmentsPage() {
   }
 
   const openedCount = sessions.filter((item) => item.alive).length
-  const availableCount = profiles.filter((item) => item.is_available).length
+  const socks5Count = profiles.filter(hasSocks5).length
   const lockedCount = locks.length
 
   return (
     <main className="prepare-workspace">
       <WorkspaceHeader
         title="浏览器环境"
-        description="Social Publisher 负责管理环境；iXBrowser 负责提供真实指纹浏览器窗口。"
+        description="iXBrowser 提供真实环境；SOCKS5、出口 IP、会话与环境绑定在同一工作区管理。"
         actions={(
           <>
             <Button onClick={load}>刷新</Button>
@@ -296,7 +362,7 @@ export default function BrowserEnvironmentsPage() {
 
       <div className="environment-summary-strip">
         <div><span>已同步</span><strong>{profiles.length}</strong><small>iX Profiles</small></div>
-        <div><span>可用</span><strong>{availableCount}</strong><small>最近一次同步存在</small></div>
+        <div><span>SOCKS5</span><strong>{socks5Count}</strong><small>已配置网络环境</small></div>
         <div><span>已打开</span><strong>{openedCount}</strong><small>Runtime Sessions</small></div>
         <div><span>任务占用</span><strong>{lockedCount}</strong><small>Profile Locks</small></div>
       </div>
@@ -305,7 +371,7 @@ export default function BrowserEnvironmentsPage() {
         <div className="environment-toolbar">
           <div className="environment-search">
             <SearchIcon />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索环境、分组或账号…" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索环境、SOCKS5、出口 IP 或账号…" />
           </div>
           <div className="environment-filters">
             {filters.map((item) => (
@@ -338,7 +404,7 @@ export default function BrowserEnvironmentsPage() {
           </div>
 
           {visibleProfiles.length === 0 ? (
-            <EmptyState title="没有匹配的浏览器环境" description="可以新建环境，或启动 iXBrowser 后同步已有环境。" />
+            <EmptyState title="没有匹配的浏览器环境" description="可以新建环境并直接配置 SOCKS5，或同步 iXBrowser 中已有环境。" />
           ) : visibleProfiles.map((profile) => {
             const session = sessionByProfile.get(profile.profile_id)
             const lock = lockByProfile.get(profile.profile_id)
@@ -347,6 +413,7 @@ export default function BrowserEnvironmentsPage() {
             const hasChannelIssue = enabledChannels.some((channel) => !channelHealthy(channel))
             const sessionTone = session?.alive ? 'success' : session && !session.alive ? 'danger' : 'neutral'
             const busy = busyProfile === profile.profile_id
+            const socks5 = hasSocks5(profile)
 
             return (
               <div className="environment-row" role="row" key={profile.profile_id}>
@@ -379,14 +446,16 @@ export default function BrowserEnvironmentsPage() {
                   {lock && <span>锁定至 {formatDateTime(lock.expires_at)}</span>}
                 </div>
                 <div className="environment-network-cell">
-                  <StatusChip tone="neutral">待接入</StatusChip>
-                  <span>Proxy / Exit IP 将通过独立网络边界接入</span>
+                  <StatusChip tone={socks5 ? 'success' : 'neutral'}>{socks5 ? 'SOCKS5' : '直连'}</StatusChip>
+                  {socks5 && <strong>{profile.proxy_ip}:{profile.proxy_port}</strong>}
+                  <span>{profile.real_ip ? `出口 IP ${profile.real_ip}` : '出口 IP 尚未检测'}</span>
                 </div>
                 <div className="environment-date-cell">
                   <strong>{profile.is_available ? '可用' : '未发现'}</strong>
                   <span>{formatDateTime(profile.last_seen_at)}</span>
                 </div>
                 <div className="environment-actions">
+                  <Button variant="ghost" onClick={() => setProxyEditor(profile)} disabled={busy || Boolean(lock) || Boolean(session?.alive)} title={session?.alive ? '先关闭环境再修改 SOCKS5' : '修改 SOCKS5'}>网络</Button>
                   {!session?.alive ? (
                     <Button variant="secondary" onClick={() => runProfileAction(profile.profile_id, 'open')} disabled={busy || Boolean(lock)}>打开</Button>
                   ) : (
@@ -409,7 +478,7 @@ export default function BrowserEnvironmentsPage() {
               <header className="environment-create-header">
                 <div>
                   <h2 id="create-environment-title">新建浏览器环境</h2>
-                  <p>环境由 iXBrowser 创建并长期复用。Social Publisher 不自行创建 Chromium。</p>
+                  <p>直接调用 iXBrowser Local API 创建真实 Profile，并可同时写入 SOCKS5。</p>
                 </div>
                 <button type="button" className="environment-create-close" onClick={() => setCreateOpen(false)} disabled={creating} aria-label="关闭">×</button>
               </header>
@@ -431,9 +500,23 @@ export default function BrowserEnvironmentsPage() {
                   ))}
                 </fieldset>
 
+                <section className="environment-proxy-section">
+                  <label className="environment-create-toggle environment-proxy-toggle">
+                    <input type="checkbox" name="proxy_enabled" />
+                    <span><strong>使用 SOCKS5</strong><small>网络配置直接写入该 iX Profile，不另建“网络中心”。</small></span>
+                  </label>
+                  <div className="environment-proxy-grid">
+                    <label className="environment-field"><span>Host</span><input name="proxy_host" placeholder="127.0.0.1 或代理主机" /></label>
+                    <label className="environment-field"><span>Port</span><input name="proxy_port" type="number" min="1" max="65535" placeholder="1080" /></label>
+                    <label className="environment-field"><span>Username</span><input name="proxy_username" autoComplete="off" placeholder="可选" /></label>
+                    <label className="environment-field"><span>Password</span><input name="proxy_password" type="password" autoComplete="new-password" placeholder="可选" /></label>
+                  </div>
+                  <p className="environment-proxy-security">Social Publisher 只镜像代理类型、Host、Port 和出口 IP；代理用户名与密码不会写入普通 SQLite。</p>
+                </section>
+
                 <div className="environment-create-note">
-                  <strong>指纹配置</strong>
-                  <span>当前使用 iXBrowser 默认环境配置，不在工作台生成或伪造指纹参数。Proxy、Cookie、账号凭据会在各自的安全模块中配置。</span>
+                  <strong>浏览器指纹</strong>
+                  <span>继续使用 iXBrowser 自己的 Profile 配置与默认值。工作台不生成、伪造或修改用于规避平台检测的指纹参数。</span>
                 </div>
 
                 <label className="environment-create-toggle">
@@ -448,6 +531,27 @@ export default function BrowserEnvironmentsPage() {
               </footer>
             </form>
           </aside>
+        </div>
+      )}
+
+      {proxyEditor && (
+        <div className="sp-modal-backdrop" role="presentation" onMouseDown={() => !proxyBusy && setProxyEditor(null)}>
+          <div className="sp-form-dialog environment-network-dialog" role="dialog" aria-modal="true" aria-label="环境网络设置" onMouseDown={(event) => event.stopPropagation()}>
+            <form onSubmit={saveProxy}>
+              <header><div><span>iXBrowser 网络</span><h2>{proxyEditor.name}</h2></div><button type="button" onClick={() => setProxyEditor(null)} disabled={proxyBusy} aria-label="关闭">×</button></header>
+              <div className="account-dialog-body">
+                <label><span>网络模式</span><select name="network_mode" defaultValue={hasSocks5(proxyEditor) ? 'socks5' : 'direct'}><option value="socks5">SOCKS5</option><option value="direct">直连</option></select></label>
+                <div className="environment-proxy-grid">
+                  <label><span>Host</span><input name="proxy_host" defaultValue={proxyEditor.proxy_ip ?? ''} placeholder="代理主机" /></label>
+                  <label><span>Port</span><input name="proxy_port" type="number" min="1" max="65535" defaultValue={proxyEditor.proxy_port ?? ''} placeholder="1080" /></label>
+                  <label><span>Username</span><input name="proxy_username" autoComplete="off" placeholder="需要时重新填写" /></label>
+                  <label><span>Password</span><input name="proxy_password" type="password" autoComplete="new-password" placeholder="需要时重新填写" /></label>
+                </div>
+                <div className="account-dialog-hint">当前出口 IP：{proxyEditor.real_ip || '尚未检测'}。修改网络前必须先关闭该真实 iXBrowser 环境。工作台不会读取或回显已有代理密码。</div>
+              </div>
+              <footer><Button type="button" onClick={() => setProxyEditor(null)} disabled={proxyBusy}>取消</Button><Button type="submit" variant="primary" disabled={proxyBusy}>{proxyBusy ? '保存中…' : '保存网络设置'}</Button></footer>
+            </form>
+          </div>
         </div>
       )}
     </main>
