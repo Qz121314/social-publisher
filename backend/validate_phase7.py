@@ -99,6 +99,17 @@ class FakePrimitives:
         self._scope_ok()
         self.calls.append("submit.click")
 
+    def _resolve_post_submit_interstitial(
+        self,
+        driver: Any,
+        composer: Any,
+        content: PlatformContent,
+    ) -> dict[str, Any]:
+        self._scope_ok()
+        assert content is self._expected_content
+        self.calls.append("submit.resolve_interstitial")
+        return {"handled": False, "reason": "no_interstitial"}
+
     def _wait_composer_closed(self, driver: Any, composer: Any) -> None:
         self._scope_ok()
         self.calls.append("verifier.wait_closed")
@@ -130,7 +141,6 @@ assert not any(
     }
 )
 
-# Phase 6 import remains compatible, but now resolves to the direct composite.
 assert TimelineFacebookFlowAdapter is FacebookCompositeAdapter
 
 component_names = {
@@ -156,6 +166,7 @@ assert component_names == {
     "FacebookConfigComponent",
 }
 assert production.components.config.keyword_groups().get("entry_keywords")
+assert production.components.config.keyword_groups().get("publish_original_keywords")
 
 fake = FakePrimitives()
 adapter = FacebookCompositeAdapter(primitives=fake)  # type: ignore[arg-type]
@@ -193,6 +204,7 @@ assert fake.calls == [
     "media.upload",
     "submit.wait_ready",
     "submit.click",
+    "submit.resolve_interstitial",
     "verifier.wait_closed",
     "verifier.verify",
     "identity.current_actor",
@@ -216,9 +228,9 @@ assert progress == [
     "submitting",
     "verifying",
     "verifying",
+    "verifying",
 ]
 
-# Contexts must be reset after the call so concurrent Worker tasks stay isolated.
 assert _ACTIVE_PUBLISH_CONTENT.get() is None
 assert _ACTIVE_SURFACE_CONTENT.get() is None
 
