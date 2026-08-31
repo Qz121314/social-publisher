@@ -6,6 +6,7 @@ type FlowConfig = {
   media_keywords: string[]
   next_keywords: string[]
   post_keywords: string[]
+  publish_original_keywords: string[]
   upload_busy_keywords: string[]
   success_keywords: string[]
 }
@@ -56,7 +57,7 @@ const fieldDefinitions: FieldDefinition[] = [
     key: 'next_keywords',
     step: '04',
     title: '流程推进',
-    description: 'Facebook 出现分步发布时，识别“下一页 / 下一步 / 继续”等中间动作。',
+    description: 'Facebook 正常分步发布时，识别“下一页 / 下一步 / 继续”等中间动作；不用于发布后的推广提示层。',
     placeholder: '例如：下一页',
     tone: 'warning',
   },
@@ -69,8 +70,16 @@ const fieldDefinitions: FieldDefinition[] = [
     tone: 'primary',
   },
   {
-    key: 'upload_busy_keywords',
+    key: 'publish_original_keywords',
     step: '06',
+    title: '发布原帖',
+    description: '最终 Post 后如果 Facebook 弹出推广 / 活动提示，只识别这些“保持普通帖子发布”动作；不会点击右侧“继续”进入推广流程。',
+    placeholder: '例如：发布原帖',
+    tone: 'warning',
+  },
+  {
+    key: 'upload_busy_keywords',
+    step: '07',
     title: '媒体处理中',
     description: '检测 Facebook 仍在上传或处理媒体，避免过早进入下一步。',
     placeholder: '例如：正在上传',
@@ -78,7 +87,7 @@ const fieldDefinitions: FieldDefinition[] = [
   },
   {
     key: 'success_keywords',
-    step: '07',
+    step: '08',
     title: '发布成功',
     description: '发布动作完成后，用于辅助确认 Facebook 已接受帖子。',
     placeholder: '例如：帖子已发布',
@@ -237,16 +246,12 @@ export default function FacebookFlowConfigPanel() {
         <div className="flow-metric safe">
           <span>安全门禁</span>
           <strong>Actor ID</strong>
-          <small>最终发布前必须与 target ID 完全一致</small>
+          <small>最终发布及“发布原帖”前均需与 target ID 完全一致</small>
         </div>
       </div>
 
       <div className="flow-map" aria-label="Facebook 发布流程">
-        <div className="flow-node locked">
-          <span>安全</span>
-          <strong>校验身份 ID</strong>
-          <small>系统固定</small>
-        </div>
+        <div className="flow-node locked"><span>安全</span><strong>校验身份 ID</strong><small>系统固定</small></div>
         <div className="flow-arrow">→</div>
         <div className="flow-node"><span>01</span><strong>点击入口</strong><small>关键词</small></div>
         <div className="flow-arrow">→</div>
@@ -259,6 +264,8 @@ export default function FacebookFlowConfigPanel() {
         <div className="flow-node locked"><span>安全</span><strong>再次校验 ID</strong><small>系统固定</small></div>
         <div className="flow-arrow">→</div>
         <div className="flow-node final"><span>05</span><strong>最终发布</strong><small>关键词</small></div>
+        <div className="flow-arrow">→</div>
+        <div className="flow-node"><span>06</span><strong>发布原帖</strong><small>按需出现</small></div>
       </div>
 
       <div className="flow-grid">
