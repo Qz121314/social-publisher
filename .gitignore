@@ -17,6 +17,7 @@ data/*.sqlite*
 data/facebook_flow.json
 data/uploads/*
 data/logs/*
+data/secure/*
 !data/uploads/.gitkeep
 !data/logs/.gitkeep
 
