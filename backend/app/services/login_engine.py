@@ -68,10 +68,18 @@ class LoginStateMachine:
         self.state = LoginState.CHECKING_SESSION
         return self.state
 
-    def session_checked(self, valid: bool) -> LoginState:
+    def session_result(self, result: LoginResult | None) -> LoginState:
         self._require(LoginState.CHECKING_SESSION)
-        if valid:
+        if result == LoginResult.SUCCESS:
             self.state = LoginState.VERIFYING_IDENTITY
+        elif result == LoginResult.TOTP_REQUIRED:
+            self.state = self._totp_or_manual()
+        elif result == LoginResult.OTHER_MFA_REQUIRED:
+            self.state = LoginState.WAITING_FOR_USER
+        elif result == LoginResult.CHECKPOINT:
+            self.state = LoginState.CHECKPOINT
+        elif result == LoginResult.UNKNOWN:
+            self.state = LoginState.NEEDS_REVIEW
         elif self.capabilities.allow_cookie_restore and self.capabilities.cookie_configured:
             self.state = LoginState.RESTORING_COOKIES
         elif self.capabilities.allow_password_login and self.capabilities.password_configured:
@@ -80,25 +88,36 @@ class LoginStateMachine:
             self.state = LoginState.WAITING_FOR_USER
         return self.state
 
-    def cookies_restored(self, valid: bool) -> LoginState:
+    def session_checked(self, valid: bool) -> LoginState:
+        return self.session_result(LoginResult.SUCCESS if valid else None)
+
+    def cookies_result(self, result: LoginResult | None) -> LoginState:
         self._require(LoginState.RESTORING_COOKIES)
-        if valid:
+        if result == LoginResult.SUCCESS:
             self.state = LoginState.VERIFYING_IDENTITY
+        elif result == LoginResult.TOTP_REQUIRED:
+            self.state = self._totp_or_manual()
+        elif result == LoginResult.OTHER_MFA_REQUIRED:
+            self.state = LoginState.WAITING_FOR_USER
+        elif result == LoginResult.CHECKPOINT:
+            self.state = LoginState.CHECKPOINT
+        elif result == LoginResult.UNKNOWN:
+            self.state = LoginState.NEEDS_REVIEW
         elif self.capabilities.allow_password_login and self.capabilities.password_configured:
             self.state = LoginState.ENTERING_CREDENTIALS
         else:
             self.state = LoginState.WAITING_FOR_USER
         return self.state
 
+    def cookies_restored(self, valid: bool) -> LoginState:
+        return self.cookies_result(LoginResult.SUCCESS if valid else None)
+
     def credentials_result(self, result: LoginResult) -> LoginState:
         self._require(LoginState.ENTERING_CREDENTIALS)
         if result == LoginResult.SUCCESS:
             self.state = LoginState.VERIFYING_IDENTITY
         elif result == LoginResult.TOTP_REQUIRED:
-            if self.capabilities.allow_totp and self.capabilities.totp_configured:
-                self.state = LoginState.SUBMITTING_TOTP
-            else:
-                self.state = LoginState.WAITING_FOR_USER
+            self.state = self._totp_or_manual()
         elif result == LoginResult.OTHER_MFA_REQUIRED:
             self.state = LoginState.WAITING_FOR_USER
         elif result == LoginResult.CHECKPOINT:
@@ -127,6 +146,11 @@ class LoginStateMachine:
         self._require(LoginState.VERIFYING_IDENTITY)
         self.state = LoginState.SUCCESS if matches else LoginState.NEEDS_REVIEW
         return self.state
+
+    def _totp_or_manual(self) -> LoginState:
+        if self.capabilities.allow_totp and self.capabilities.totp_configured:
+            return LoginState.SUBMITTING_TOTP
+        return LoginState.WAITING_FOR_USER
 
     def _require(self, expected: LoginState) -> None:
         if self.state != expected:
