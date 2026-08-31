@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models.account import Account, AccountGroup
 from app.schemas.account import AccountGroupCreate, AccountGroupRead, AccountGroupUpdate
 
-router = APIRouter(prefix="/account-groups", tags=["account-groups"])
+router = APIRouter(prefix="/groups", tags=["account-groups"])
 
 
 def _to_read(group: AccountGroup, member_count: int = 0) -> AccountGroupRead:
