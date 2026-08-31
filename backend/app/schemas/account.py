@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.resource_pool import ProxyEndpointRead
+
 SUPPORTED_PLATFORMS = {
     "facebook",
     "instagram",
@@ -79,8 +81,9 @@ class AccountGroupRead(AccountGroupBase):
 class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     platform: str = Field(min_length=1, max_length=50)
-    ix_profile_id: int
+    ix_profile_id: int | None = None
     group_id: int | None = None
+    proxy_id: int | None = None
     enabled: bool = True
     notes: str | None = None
 
@@ -118,6 +121,12 @@ class AccountProxyCreate(BaseModel):
 
 
 class AccountOnboardCreate(BaseModel):
+    """Compatibility path for manually creating one account + environment.
+
+    The Phase 10 primary path is now bulk resource preparation; this endpoint is
+    retained as an advanced/manual import path.
+    """
+
     name: str = Field(min_length=1, max_length=255)
     platform: str = Field(min_length=1, max_length=50)
     group_id: int | None = None
@@ -158,6 +167,7 @@ class AccountUpdate(BaseModel):
     platform: str | None = Field(default=None, min_length=1, max_length=50)
     ix_profile_id: int | None = None
     group_id: int | None = None
+    proxy_id: int | None = None
     enabled: bool | None = None
     status: str | None = Field(default=None, max_length=50)
     notes: str | None = None
@@ -184,15 +194,17 @@ class AccountRead(BaseModel):
     id: int
     name: str
     platform: str
-    ix_profile_id: int
+    ix_profile_id: int | None
     group_id: int | None
+    proxy_id: int | None
     enabled: bool
     status: str
     notes: str | None
     created_at: datetime
     updated_at: datetime
-    browser_profile: BrowserProfileRead
+    browser_profile: BrowserProfileRead | None = None
     group: AccountGroupRead | None = None
+    proxy_endpoint: ProxyEndpointRead | None = None
 
 
 class AccountOnboardRead(BaseModel):
@@ -203,5 +215,5 @@ class AccountOnboardRead(BaseModel):
 
 
 class AccountBatchMove(BaseModel):
-    account_ids: list[int] = Field(min_length=1, max_length=500)
+    account_ids: list[int] = Field(min_length=1, max_length=1000)
     group_id: int | None = None
