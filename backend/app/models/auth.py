@@ -44,3 +44,24 @@ class AccountAuthConfig(Base):
         onupdate=utcnow,
         nullable=False,
     )
+
+
+class AccountLoginIdentity(Base):
+    """Confirmed platform login identity for one Social Publisher account.
+
+    This is deliberately separate from Channel / publish identity. For Facebook
+    it stores the confirmed ``c_user`` value for the login account. A Page
+    identity may later be selected as a Channel, but that must never silently
+    replace the account that owns the browser session.
+    """
+
+    __tablename__ = "account_login_identities"
+
+    account_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    platform_identity_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

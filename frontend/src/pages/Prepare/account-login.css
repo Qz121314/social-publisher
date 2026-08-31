@@ -1,0 +1,69 @@
+.account-login-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.account-login-recover,
+.account-login-settings {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sp-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.account-login-recover:hover:not(:disabled),
+.account-login-settings:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.account-login-recover:disabled,
+.account-login-settings:disabled {
+  color: var(--sp-text-faint);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.account-login-confirm-dialog {
+  width: min(520px, calc(100vw - 48px));
+}
+
+.account-login-confirm-copy {
+  margin: 0;
+  color: var(--sp-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.account-login-confirm-summary {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-sm);
+  background: var(--sp-surface-subtle);
+}
+
+.account-login-confirm-summary > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.account-login-confirm-summary span {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+}
+
+.account-login-confirm-summary strong {
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

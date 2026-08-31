@@ -35,21 +35,21 @@ def main() -> None:
     machine = LoginStateMachine(capabilities)
     assert machine.start() == LoginState.OPENING_PROFILE
     assert machine.profile_opened() == LoginState.CHECKING_SESSION
-    assert machine.session_checked(False) == LoginState.RESTORING_COOKIES
-    assert machine.cookies_restored(False) == LoginState.ENTERING_CREDENTIALS
+    assert machine.session_result(None) == LoginState.RESTORING_COOKIES
+    assert machine.cookies_result(None) == LoginState.ENTERING_CREDENTIALS
     assert machine.credentials_result(LoginResult.TOTP_REQUIRED) == LoginState.SUBMITTING_TOTP
-    assert machine.totp_result(True) == LoginState.VERIFYING_IDENTITY
+    assert machine.totp_result(LoginResult.SUCCESS) == LoginState.VERIFYING_IDENTITY
     assert machine.identity_verified(True) == LoginState.SUCCESS
 
     manual_machine = LoginStateMachine(LoginCapabilities())
     manual_machine.start()
     manual_machine.profile_opened()
-    assert manual_machine.session_checked(False) == LoginState.WAITING_FOR_USER
+    assert manual_machine.session_result(None) == LoginState.WAITING_FOR_USER
 
     checkpoint_machine = LoginStateMachine(LoginCapabilities(password_configured=True))
     checkpoint_machine.start()
     checkpoint_machine.profile_opened()
-    checkpoint_machine.session_checked(False)
+    checkpoint_machine.session_result(None)
     assert checkpoint_machine.credentials_result(LoginResult.CHECKPOINT) == LoginState.CHECKPOINT
 
     secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
