@@ -16,7 +16,7 @@ from app.schemas.account import BrowserProfileRead
 from app.services.browser_sessions import BrowserSessionError, browser_sessions
 from app.services.ixbrowser import IXBrowserError, IXBrowserService
 from app.services.profile_locks import ProfileBusyError, profile_locks
-from app.services.profile_sync import sync_ix_profiles
+from app.services.profile_sync import sanitize_profile_payload, sync_ix_profiles
 from app.services.runtime_settings import (
     MAX_WARM_SESSION_TTL_SECONDS,
     get_warm_session_ttl_seconds,
@@ -40,6 +40,13 @@ class RuntimeSettingsUpdate(BaseModel):
         ge=0,
         le=MAX_WARM_SESSION_TTL_SECONDS,
     )
+
+
+class IXBrowserProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    site_url: str = Field(default="chrome://newtab", min_length=1, max_length=2048)
+    group_id: int | None = Field(default=None, ge=1)
+    open_after_create: bool = True
 
 
 @router.get("/status")
@@ -86,8 +93,88 @@ def update_runtime_settings(
 @router.get("/ixbrowser/profiles")
 def ixbrowser_profiles() -> dict[str, object]:
     ix = IXBrowserService()
-    profiles = ix.get_profiles()
+    profiles = [sanitize_profile_payload(item) for item in ix.get_profiles()]
     return {"items": profiles, "count": len(profiles)}
+
+
+@router.post(
+    "/ixbrowser/profiles",
+    status_code=http_status.HTTP_201_CREATED,
+)
+def create_ixbrowser_profile(
+    payload: IXBrowserProfileCreate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Create a persistent iX Profile and optionally open its real window.
+
+    Creation and opening are intentionally reported separately. Once iX says
+    the Profile was created we never report the whole request as a create
+    failure merely because the follow-up open/attach step failed.
+    """
+
+    ix = IXBrowserService()
+    try:
+        created = ix.create_profile(
+            name=payload.name,
+            site_url=payload.site_url,
+            group_id=payload.group_id,
+        )
+    except IXBrowserError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    profile_id = created.get("profile_id")
+    sync_error: str | None = None
+    try:
+        sync_ix_profiles(db)
+    except (RuntimeError, IXBrowserError) as exc:
+        sync_error = str(exc)
+
+    if profile_id is None:
+        try:
+            match = ix.find_profile_by_name(payload.name)
+            if match is not None:
+                profile_id = int(match["profile_id"])
+        except (IXBrowserError, KeyError, TypeError, ValueError):
+            profile_id = None
+
+    local_profile = db.get(BrowserProfile, profile_id) if isinstance(profile_id, int) else None
+    if local_profile is None and isinstance(profile_id, int):
+        try:
+            remote = ix.get_profile(profile_id)
+            if remote is not None:
+                local_profile = BrowserProfile(
+                    profile_id=profile_id,
+                    name=str(remote.get("name") or payload.name),
+                    group_id=_optional_int(remote.get("group_id")),
+                    group_name=_optional_str(remote.get("group_name")),
+                    raw_json="{}",
+                    is_available=True,
+                )
+                db.merge(local_profile)
+                db.commit()
+                local_profile = db.get(BrowserProfile, profile_id)
+        except IXBrowserError as exc:
+            sync_error = sync_error or str(exc)
+
+    opened = False
+    open_error: str | None = None
+    if payload.open_after_create and isinstance(profile_id, int):
+        try:
+            result = browser_sessions.open(profile_id)
+            opened = bool(result.get("alive"))
+        except (IXBrowserError, BrowserSessionError) as exc:
+            open_error = str(exc)
+
+    return {
+        "status": "created",
+        "profile_id": profile_id,
+        "name": created["name"],
+        "site_url": created["site_url"],
+        "synced": local_profile is not None,
+        "opened": opened,
+        "sync_error": sync_error,
+        "open_error": open_error,
+    }
 
 
 @router.post("/ixbrowser/sync")
@@ -222,3 +309,18 @@ def _require_synced_profile(db: Session, profile_id: int) -> BrowserProfile:
             detail="iX profile is not in the local database. Sync profiles first.",
         )
     return profile
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_str(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)

@@ -1,6 +1,6 @@
 from typing import Any
 
-from ixbrowser_local_api import IXBrowserClient
+from ixbrowser_local_api import IXBrowserClient, Profile
 
 
 class IXBrowserError(RuntimeError):
@@ -63,6 +63,76 @@ class IXBrowserService:
         if not result:
             return None
         return result[0]
+
+    def find_profile_by_name(self, name: str) -> dict[str, Any] | None:
+        result = self.client.get_profile_list(name=name)
+        if result is None:
+            self._raise_last_error("profile lookup")
+        expected = name.strip()
+        for item in result:
+            if str(item.get("name") or "").strip() == expected:
+                return dict(item)
+        return None
+
+    def create_profile(
+        self,
+        *,
+        name: str,
+        site_url: str = "chrome://newtab",
+        group_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Create one persistent iXBrowser profile using iX defaults.
+
+        Fingerprint and proxy values are intentionally not synthesized here.
+        Unspecified settings stay under iXBrowser's own defaults. Network and
+        credential configuration will be added through their own product
+        boundaries instead of leaking raw profile payloads into the React UI.
+        """
+
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise IXBrowserError("iXBrowser profile name cannot be empty.")
+
+        profile = Profile()
+        profile.name = normalized_name
+        profile.site_url = site_url.strip() or "chrome://newtab"
+        if group_id is not None:
+            profile.group_id = group_id
+
+        result = self.client.create_profile(profile)
+        if result is None:
+            self._raise_last_error("create profile")
+
+        profile_id = self._extract_profile_id(result)
+        if profile_id is None:
+            created = self.find_profile_by_name(normalized_name)
+            if created is not None:
+                profile_id = self._extract_profile_id(created)
+
+        return {
+            "profile_id": profile_id,
+            "name": normalized_name,
+            "site_url": profile.site_url,
+        }
+
+    @staticmethod
+    def _extract_profile_id(result: object) -> int | None:
+        if isinstance(result, bool):
+            return None
+        if isinstance(result, int):
+            return result
+        if isinstance(result, str) and result.isdigit():
+            return int(result)
+        if isinstance(result, dict):
+            for key in ("profile_id", "id"):
+                value = result.get(key)
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, int):
+                    return value
+                if isinstance(value, str) and value.isdigit():
+                    return int(value)
+        return None
 
     def get_opened_profiles(self) -> list[dict[str, Any]]:
         result = self.client.get_opened_profile_list()

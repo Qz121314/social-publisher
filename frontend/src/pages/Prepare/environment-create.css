@@ -1,0 +1,207 @@
+.environment-create-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(17, 24, 39, 0.26);
+}
+
+.environment-create-drawer {
+  width: 560px;
+  max-width: calc(100vw - 220px);
+  height: 100%;
+  border-left: 1px solid var(--sp-border);
+  background: var(--sp-surface);
+  box-shadow: var(--sp-shadow-float);
+}
+
+.environment-create-drawer form {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.environment-create-header {
+  min-height: 76px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--sp-divider);
+}
+
+.environment-create-header h2 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.environment-create-header p {
+  margin: 5px 0 0;
+  color: var(--sp-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.environment-create-close {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--sp-radius-sm);
+  background: transparent;
+  color: var(--sp-text-muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.environment-create-close:hover:not(:disabled) {
+  border-color: var(--sp-border);
+  background: var(--sp-surface-hover);
+  color: var(--sp-text);
+}
+
+.environment-create-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+}
+
+.environment-field {
+  display: grid;
+  gap: 7px;
+}
+
+.environment-field > span,
+.environment-start-page legend {
+  color: var(--sp-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.environment-field input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--sp-border-strong);
+  border-radius: var(--sp-radius-sm);
+  outline: none;
+  background: #fff;
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.environment-field input:focus {
+  border-color: var(--sp-accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.environment-field small,
+.environment-start-page small,
+.environment-create-toggle small {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.environment-start-page {
+  display: grid;
+  gap: 8px;
+  margin: 22px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.environment-start-page legend {
+  margin-bottom: 7px;
+}
+
+.environment-start-page > label {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 11px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-sm);
+  background: #fff;
+  cursor: pointer;
+}
+
+.environment-start-page > label:hover,
+.environment-start-page > label.is-selected {
+  border-color: #b9cae6;
+  background: #f8faff;
+}
+
+.environment-start-page input,
+.environment-create-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--sp-accent);
+}
+
+.environment-start-page label > span,
+.environment-create-toggle > span {
+  display: grid;
+  gap: 3px;
+}
+
+.environment-start-page strong,
+.environment-create-toggle strong {
+  color: var(--sp-text);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.environment-create-note {
+  display: grid;
+  gap: 5px;
+  margin-top: 22px;
+  padding: 11px 12px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-sm);
+  background: #fafbfc;
+}
+
+.environment-create-note strong {
+  color: var(--sp-text);
+  font-size: 11px;
+}
+
+.environment-create-note span {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.environment-create-toggle {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 10px 11px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-sm);
+  cursor: pointer;
+}
+
+.environment-create-footer {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--sp-divider);
+  background: #fbfbfc;
+}

@@ -1,269 +1,555 @@
 # Social Publisher
 
-基于 **iXBrowser + Selenium** 的本地多账号、多平台矩阵内容发布与浏览器自动化系统。
+本地运行的 **Windows 社交媒体矩阵管理与自动发布工作台**。
 
-> 当前阶段：**Facebook V1 Release Candidate（Phase 9）**。Facebook 的正式产品链路已经迁移到 `Channel → PublishPlan → PublishJob → Scheduler → Worker → Platform Adapter → PublishAttempt`。Instagram Feed Post 已进入 **Phase 8A Experimental**，在 Facebook RC 完成实机验收前暂停继续扩展 Instagram / Threads / X。
+当前技术核心：**React + TypeScript + FastAPI + SQLite + iXBrowser Local API + Selenium**。Windows 桌面产品目标采用 **Tauri 2 + React/TypeScript + Python/FastAPI sidecar**。
+
+> 当前阶段：**Phase 10 — Desktop Product Migration**。Facebook V1 RC 的发布执行链继续作为生产基础；Phase 10 正在把旧的“多个技术中心”重构为面向人的工作流，并把 iXBrowser、账号、登录、分组和批量任务逐步集成进 Social Publisher 工作台。
 
 ---
 
 ## 1. 产品定位
 
-Social Publisher 的正式定位是：
+Social Publisher 的正式定位：
 
-> **基于独立浏览器环境的本地社交媒体矩阵自动发布平台。**
+> **以 Social Publisher 为主工作台，以 iXBrowser 为 Browser Runtime Provider 的本地多账号自动发布系统。**
 
-核心业务链：
+用户长期操作的是：
 
 ```text
-素材中心
-   ↓
-iX账号中心 / Channel
-   ↓
-流程中心
-   ↓
-发布中心
-   ↓
-PublishPlan
-   ↓
-计划中心 / Scheduler
-   ↓
-任务中心 / PublishJob / PublishAttempt
+账号
+  ↓
+分组
+  ↓
+内容
+  ↓
+任务
+  ↓
+结果
 ```
 
-核心原则：
+而不是直接操作：
 
-- 素材、渠道、流程、发布计划和实际执行任务必须分离。
-- iXBrowser / Selenium / Worker / Profile Lock 属于执行基础设施，不作为普通用户 UI 的主体。
-- 新平台复用现有一级导航，不为 Instagram / Threads / X 单独增加一级模块。
-- 自动化流程采用受约束的 Browser Workflow，不开放任意 JS / Python / Shell。
-- 只用于用户有权管理的账号、主页和渠道。
-- CAPTCHA、Checkpoint、登录恢复、安全挑战必须进入人工处理，不做绕过。
+```text
+Profile / WebDriver / Worker / Job ID / FlowRevision / SDK
+```
+
+### 核心产品原则
+
+1. **Social Publisher 是主控制台。** 能在工作台完成的操作，不要求用户回到 iXBrowser 管理界面重复操作。
+2. **iXBrowser 只提供真实的隔离浏览器环境。** Profile 的创建、打开、关闭、窗口、Cookies、Proxy 等能力通过 Local API 被工作台调用。
+3. **登录、发布、检查始终发生在真实 iXBrowser Profile 窗口中。** React 不模拟 Facebook / Instagram 登录页。
+4. **账号与浏览器环境建立稳定绑定。** 不为同一账号在每次任务中随机创建新的 Profile。
+5. **正常 Session 不主动重新登录。** 批量“登录”实际是批量检查并恢复登录状态。
+6. **分组是批量任务的一级选择单位。** 用户正常路径应尽量接近：`选组 → 执行动作 → 只处理异常`。
+7. **系统内部可以复杂，用户路径必须短。** TargetResolver、Snapshot、ProfileLock、Worker Pool、Preflight 等属于系统能力，不应成为用户必须逐步点击的页面。
+8. 只用于用户有权管理的账号、主页和渠道；不绕过 CAPTCHA、Checkpoint、平台安全挑战或访问控制。
 
 ---
 
-## 2. V1 后台：8 个中心
+## 2. Phase 10 产品信息架构
 
-正式路由已经建立：
-
-```text
-/             总览
-/assets       素材中心
-/accounts     iX账号中心
-/flows        流程中心
-/publish      发布中心
-/plans        计划中心
-/tasks        任务中心
-/settings     配置中心
-```
-
-### 总览
-
-回答系统当前状态：
-
-- 今日计划
-- 执行中
-- 成功 / 失败 / 待人工确认
-- Scheduler / Worker Pool / iXBrowser 健康状态
-- Facebook / Instagram 平台流程状态
-
-### 素材中心
-
-管理发布内容：
-
-- 文案
-- 图片
-- 视频
-- 混合媒体
-- Emoji / 完整 Unicode
-
-Asset/Content 只描述“发什么”，不永久绑定账号或发布时间。
-
-### iX账号中心
-
-管理：
+正式产品一级导航：
 
 ```text
-iX Environment
-   ├── Facebook Channel
-   │    └── Profile / Page
-   └── Instagram Channel
-        └── Feed Account
+工作台
+准备
+发布
+运行
+检查
+────────
+设置
 ```
 
-V1 发布只选择 `Channel`。账号分组可直接用于批量选择。
+### 工作台
 
-### 流程中心
+回答：
 
-正式领域模型：
+> 今天系统发生了什么？现在有什么需要处理？
+
+优先展示：
+
+- Needs Attention
+- 正在运行
+- 即将执行
+- 今日已发布
+- 准备状态
+
+不是库存统计 Dashboard，不优先展示 Asset 数量、Job ID、Worker 指标。
+
+### 准备
+
+当前结构：
 
 ```text
-Flow
-└── FlowRevision
-    └── FlowStep
+准备
+├─ 概览
+├─ 浏览器环境
+├─ 网络 / IP
+├─ 社交账号
+├─ 素材中心
+└─ 自动化流程
 ```
 
-发布计划必须绑定固定 `flow_revision_id`。后续流程升级不能改变已经创建的 Plan/Job。
+网络 / IP 后续可以根据使用规模进一步收进“浏览器环境”的网络区域；底层仍保持独立服务边界。
 
-### 发布中心
+### 发布
 
-当前支持：
+回答：
 
-- 从素材中心选择 Asset
-- 临时创建内容
-- 按平台选择 Channel
-- 分组全选
-- 立即发布
-- 定时发布
-- 保存草稿
-- 发布间隔
+> 发什么？发给谁？什么时候发？
 
-一个 V1 `PublishPlan` 只允许一个平台，避免跨平台 Flow 和验证语义混合。
+用户级概念：
 
-### 计划中心
+```text
+新建发布
+草稿
+已计划
+日历
+```
 
-Scheduler 的 Source of Truth 是 **SQLite**。
+`PublishPlan` 是后台领域模型，不作为普通用户必须理解的一级概念。
 
-电脑或 Backend 重启后，已保存计划不能丢失。
+### 运行
 
-### 任务中心
+回答：
 
-统一展示：
+> 当前正在执行什么？执行到哪一步？
 
-- PublishJob 状态
-- 当前 Stage
-- PublishAttempt
-- Timeline
-- 执行耗时
-- 失败原因
-- `needs_review` 人工确认
+用户级状态：
 
-### 配置中心
+- Scheduled
+- Queued
+- Running
+- Waiting for User
+- Needs Review
+- Failed
+- Published / Succeeded
 
-主要管理：
+### 检查
 
-- 默认时区
-- Worker 最大并发
-- 默认发布间隔
-- 失败重试
-- Browser Warm Session TTL
-- iXBrowser Local API
-- 平台高级配置
+默认进入“需要处理”，用于统一处理：
+
+- 2FA / MFA
+- Checkpoint
+- 登录异常
+- 发布结果无法确认
+- IP / 环境异常
+- 明确失败
 
 ---
 
-## 3. 正式领域模型
+## 3. iXBrowser Runtime 边界
+
+架构：
+
+```text
+Social Publisher Desktop
+        ↓
+BrowserRuntime
+        ↓
+IXBrowserRuntime
+        ↓
+iXBrowser Local API
+        ↓
+真实 iX Profile Window
+        ↓
+Selenium / CDP attach
+        ↓
+Facebook / Instagram
+```
+
+目标接口：
+
+```text
+BrowserRuntime
+└─ IXBrowserRuntime
+   ├─ list_profiles()
+   ├─ create_profile()
+   ├─ update_profile()
+   ├─ delete_profile()
+   ├─ open_profile()
+   ├─ close_profile()
+   ├─ health_check()
+   ├─ arrange_windows()
+   └─ attach_automation()
+```
+
+### 工作台应逐步接管的 iX 操作
+
+- 同步环境
+- 新建环境
+- 修改环境
+- 删除环境
+- 打开 / 关闭
+- 批量创建
+- Proxy 配置与检测
+- Cookie 导入 / Session 恢复
+- 查询运行状态
+- Windows 窗口定位、排列、置前
+
+### 当前已实现
+
+- iX Profile 同步
+- BrowserProfile 本地镜像
+- Browser open / attach / probe / close
+- Browser Session Pool
+- Profile Lock
+- Warm Session TTL
+- Phase 10 浏览器环境 React 工作区
+- Profile / Session / Lock / Channel 的真实状态聚合
+
+### 当前继续实现
+
+- 从 Social Publisher 工作台直接创建新的 iX Profile
+- 后续再接 Proxy / Account / Cookie / Login Engine
+
+---
+
+## 4. 浏览器环境与社交账号不是同一个对象
+
+必须保持以下边界：
 
 ```text
 BrowserProfile
-     │
-     ▼
-Channel
+= iX 指纹浏览器环境
 
-Asset / Content
+SocialAccount / Account
+= 平台登录账号
 
-Flow
-└── FlowRevision
-    └── FlowStep
-
-PublishPlan
-├── PublishJob
-│   └── PublishAttempt
-└── PublishJob
-    └── PublishAttempt
+SocialIdentity / Channel
+= 账号下真实可执行身份 / 发布目标
 ```
 
-### Channel
-
-一个 Channel 代表一个真实可发布目标：
+一个 iX Profile 可能对应：
 
 ```text
-channel_id
-profile_id
-platform
-target_id
-target_name
-target_type
-target_url
-enabled
-health_status
-last_checked_at
+Facebook 登录账号 John
+├─ John Personal
+├─ Page A
+└─ Page B
 ```
 
-稳定身份 ID 用于授权判断，名称只用于展示和导航。
+因此：
 
-### PublishPlan
+- `Profile != Account`
+- `Account != Channel`
+- 发布绝不能因为发现多个 Page 就默认全部发布。
 
-表示一次用户发布意图：
+每个账号应有明确的默认发布身份 / Channel，或者在创建任务时显式选择。
+
+---
+
+## 5. 社交账号与账号分组
+
+账号分组是正式业务能力，不等同于 iXBrowser 自己的 Profile Group。
 
 ```text
-Asset / Content
-Channels
-立即 / 定时 / 草稿
-时区
-发布间隔
-Flow Revision
+iXBrowser Group
+→ 组织浏览器环境
+
+AccountGroup
+→ 组织业务账号与批量任务
 ```
 
-### PublishJob
+### AccountGroup V1
 
-一个 Plan 选择 N 个 Channel，就生成 N 个独立 Job：
+推荐模型：
 
 ```text
-Plan
-├── Job → Channel 001
-├── Job → Channel 002
-└── Job → Channel 003
+AccountGroup
+├─ id
+├─ name
+├─ description
+├─ sort_order
+├─ enabled
+├─ created_at
+└─ updated_at
 ```
 
-### PublishAttempt
+一个 SocialAccount 在 V1 有一个主分组；多维组织以后使用 Tag，而不是无限层级子分组。
 
-记录每一次真实执行：
+### 用户操作原则
+
+社交账号页面本身就是批量操作入口：
 
 ```text
-attempt_no
-status
-stage
-started_at
-submitted_at
-finished_at
-browser_open_ms
-platform_ms
-media_ms
-verification_ms
-total_ms
-result_json
-error_message
+Store A · 38 个账号
+
+[恢复登录] [检查登录] [检查 IP] [发布] [更多]
+```
+
+不再要求用户经过：
+
+```text
+分组详情
+→ 新建任务
+→ Target Selector
+→ Preflight 页面
+→ 再确认
+```
+
+普通操作尽量缩短为：
+
+```text
+选组
+→ 动作
+→ 自动执行
+→ 只有异常才叫用户处理
+```
+
+详细设计：
+
+```text
+docs/phase-10-account-groups-batch-tasks-v1.md
 ```
 
 ---
 
-## 4. Snapshot 原则
+## 6. 批量任务与 Target Snapshot
 
-创建 Plan/Job 时固定关键输入：
+分组是用户选择单位，但**不是运行时动态目标**。
+
+任务创建时：
+
+```text
+AccountGroup
+    ↓
+TaskTargetResolver
+    ↓
+具体 Accounts / BrowserProfiles / Channels
+    ↓
+冻结 Target Snapshot
+    ↓
+Jobs
+```
+
+### 必须冻结目标
+
+例如：
+
+```text
+08/31 Store A = A1, A2, A3
+08/31 创建 09/01 09:00 的任务
+08/31 晚上把 A4 加入 Store A
+09/01 任务仍只执行 A1, A2, A3
+```
+
+保存：
+
+```text
+source_selection_json
+resolved_targets_snapshot_json
+```
+
+### Resolver 按任务类型解析
+
+```text
+LOGIN        Group → Accounts
+CHECK_LOGIN  Group → Accounts
+CHECK_IP     Group → unique BrowserProfiles
+OPEN_PROFILE Group → unique BrowserProfiles
+PUBLISH      Group → explicit/default Channels
+```
+
+同一目标通过多个分组选中时必须去重。
+
+---
+
+## 7. 登录策略
+
+“批量登录”产品语义应理解为：
+
+> **批量检查并恢复登录状态，而不是把所有健康账号重新输入密码登录一次。**
+
+默认 Login State Machine：
+
+```text
+OPEN FIXED IX PROFILE
+        ↓
+CHECK EXISTING SESSION
+        ├─ valid → VERIFY IDENTITY → SUCCESS
+        └─ invalid
+              ↓
+COOKIE / SESSION RESTORE
+        ├─ valid → VERIFY IDENTITY → SUCCESS
+        └─ invalid
+              ↓
+PASSWORD LOGIN
+              ↓
+OBSERVE RESULT
+        ├─ SUCCESS
+        ├─ TOTP REQUIRED
+        ├─ OTHER MFA REQUIRED
+        ├─ CHECKPOINT
+        ├─ INVALID CREDENTIALS
+        └─ UNKNOWN
+```
+
+### 优先级
+
+1. **Existing Session** — 首选；健康 Session 不碰。
+2. **Cookie / Session Restore** — Cookie 有效时可自动恢复，但必须重新验证真实身份。
+3. **Username / Password** — 兜底。
+4. **Built-in TOTP** — 用户自己的 TOTP Secret 可由本地 Credential Vault 安全读取并生成验证码。
+5. **Manual 2FA / Checkpoint** — SMS、Email、App Approval、Security Key、Checkpoint、未知安全验证转人工。
+
+### Cookie 原则
+
+Cookie 不等于永久登录，也不能把“注入成功”当“登录成功”。
+
+Cookie 应绑定：
+
+```text
+Account
++
+BrowserProfile
++
+Platform
+```
+
+不默认跨 Profile 自动复用。
+
+### 凭据安全
+
+普通 SQLite 不保存明文：
+
+- Password
+- Cookie blob
+- TOTP Secret
+- Proxy password
+
+数据库只保存 `CredentialRef`；实际 Secret 目标使用 Windows Credential Manager / DPAPI 或等价本地加密存储。
+
+---
+
+## 8. 2FA / Checkpoint 与人工接管
+
+2FA 不是“整个批量任务失败”。
+
+例如：
+
+```text
+Store A · 恢复登录
+38 accounts
+
+31 已完成
+3 自动处理中
+2 需要 2FA
+1 Checkpoint
+1 密码错误
+```
+
+可自动处理：
+
+- 用户配置的 TOTP Authenticator Secret
+
+默认转人工：
+
+- SMS Code
+- Email Code
+- App Approval
+- Security Key / WebAuthn
+- Checkpoint
+- 未知 Security Challenge
+
+人工处理入口：
+
+```text
+需要处理
+→ [打开浏览器]
+→ 对应真实 iX Profile Window 置前
+→ 用户完成验证
+→ Login Engine 再次检查 Session / Identity
+```
+
+不绕过平台安全验证。
+
+---
+
+## 9. Browser Workspace
+
+Windows 桌面版目标不是把 Chromium 硬嵌到 React，而是进行**窗口级视觉整合**：
+
+```text
+Social Publisher
+        +
+真实 iXBrowser Windows
+```
+
+Tauri / Windows Window Manager 后续负责：
+
+- 找到对应 iX 窗口
+- 置前
+- 移动 / 调整大小
+- 多窗口平铺
+- 跳转到需要人工处理的环境
+
+Browser Workspace 是异常处理和人工接管工具，不应成为所有正常任务的强制步骤。
+
+---
+
+## 10. 正式发布领域模型
+
+现有生产链继续保留：
+
+```text
+Asset / Content
+
+Flow
+└─ FlowRevision
+   └─ FlowStep
+
+BrowserProfile
+   ↓
+Channel
+
+PublishPlan
+├─ PublishJob
+│  └─ PublishAttempt
+└─ PublishJob
+   └─ PublishAttempt
+```
+
+### Source of Truth
+
+| 对象 | 定位 |
+|---|---|
+| `Channel` | 正式可发布目标 |
+| `PublishPlan` | 发布意图 Source of Truth |
+| `PublishJob` | 单目标正式发布任务 |
+| `PublishAttempt` | 真实执行记录 |
+| `PublishTarget` | 发现 / 迁移兼容对象 |
+| `WorkerTask` | Runtime 基础设施，不是产品层发布任务 |
+
+不要为了新的 UI 信息架构重命名或破坏现有领域模型。
+
+### Snapshot 原则
+
+创建 Plan / Job 时冻结：
 
 ```text
 content snapshot
 channel snapshot
 flow_revision_id
 scheduled_at
+resolved target snapshot
 ```
 
-任务运行时不能重新读取“最新定义”改变已创建任务的行为。
+素材库、账号分组或流程后续发生变化，不应静默修改已创建任务。
 
 ---
 
-## 5. Scheduler / Worker 架构
+## 11. Scheduler / Worker / Lock
 
 ```text
-React Admin
+React / Desktop Shell
     ↓
 FastAPI
     ↓
 SQLite
     ↓
-Scheduler
-    ↓
-Job Queue
+Scheduler / Operation Engine
     ↓
 Bounded Worker Pool
     ↓
@@ -271,281 +557,170 @@ Profile Lock
     ↓
 Browser Session Pool
     ↓
-iXBrowser Local API
-    ↓
-Selenium
+iXBrowser
     ↓
 Platform Adapter
 ```
 
-Scheduler 只发现正式 Plan Job：
+规则：
 
-```text
-WHERE plan_id IS NOT NULL
-AND status = scheduled
-AND scheduled_at <= now
-```
+- 同一个 iX Profile 同时最多执行 1 个浏览器敏感任务。
+- 后续账号登录任务增加 Account Lock，避免同一账号在两个环境同时进行敏感登录。
+- 不同 Profile 可以在 bounded Worker Pool 内并发。
+- 不把临时锁冲突误判为业务失败。
+- 批量任务不是一个巨大的 `for` 循环；每个目标有独立 Job / 状态。
+- 一个账号失败或 Waiting for User 不阻塞整个分组剩余目标。
 
-执行规则：
-
-- 同一个 iX Profile 同时最多运行 1 个发布任务。
-- 不同 Profile 可使用 bounded Worker Pool 并发。
-- Profile Lock 被其他操作占用时，Scheduler 延后任务，不把临时忙碌误判为发布失败。
-- Channel 被停用时阻止 dispatch，但不修改已经冻结的 Job snapshot。
-- Warm Session 在 TTL 内复用，超时后回收。
+发布继续使用 `PublishPlan → PublishJob → PublishAttempt`；其他登录/IP/健康检查任务可以使用单独的 `OperationBatch → OperationJob`，不要破坏发布模型。
 
 ---
 
-## 6. Facebook V1 发布安全模型
+## 12. Facebook V1 安全模型
 
-Facebook V1 正式生产 Adapter：
-
-```text
-FacebookCompositeAdapter
-```
-
-核心流水线：
+正式执行核心：
 
 ```text
 检查登录
-   ↓
-校验 actor_id == target_id
-   ↓
+↓
+校验当前 actor
+↓
 打开目标
-   ↓
-打开 Composer
-   ↓
-输入正文
-   ↓
-上传媒体（如有）
-   ↓
-等待媒体处理
-   ↓
-Next（如页面需要）
-   ↓
+↓
+Composer
+↓
+正文 / 媒体
+↓
 发布前再次校验身份
-   ↓
+↓
 Post
-   ↓
+↓
 验证结果
 ```
 
-个人主页和公共主页共用同一条流水线，不按 `target_type` 维护两套发布逻辑。
-
-### Target Actor Gate
-
-真正的授权条件：
+授权门禁：
 
 ```text
 current actor_id == configured target_id
 ```
 
-`target_type` 只用于展示。
+`target_type` 只用于展示，不作为授权条件。
 
 ### needs_review
 
-- 最终提交前明确失败 → `failed`
-- 已可能点击最终 Post，但结果无法确认 → `needs_review`
-- `needs_review` 永不自动重试
-- Backend 在可能已经提交的阶段异常退出，也必须保守进入 `needs_review`
-- 用户人工确认“已发布”后收口为成功
-- 用户确认“未发布”后才允许创建安全的新 Attempt
+- 提交前确定失败 → `failed`
+- 已可能执行最终 Post，但无法确认结果 → `needs_review`
+- `needs_review` 不自动重试
+- 用户确认未发布后，才允许创建安全的新 Attempt
+
+### 禁止
+
+- CAPTCHA 绕过
+- Checkpoint 绕过
+- WebDriver / `navigator.webdriver` 隐藏
+- 浏览器指纹伪装用于规避平台检测
+- 模拟随机鼠标 / 随机时间以规避平台审查
+- 安全挑战绕过
+
+系统优化方向是稳定 Session、正确身份门禁、合理并发、异常停机和人工接管，不是规避平台风控。
 
 ---
 
-## 7. 当前代码真实状态
+## 13. Phase 10 React UI System
 
-### Facebook — V1 Release Candidate
+已建立：
 
-已实现：
-
-- iXBrowser 环境同步
-- Browser open / attach / probe / close
-- Worker Pool + Profile Lock
-- Backend 重启后的保守恢复
-- Channel 模型
-- Flow / FlowRevision / FlowStep
-- Asset / Content
-- PublishPlan
-- PublishJob
-- PublishAttempt
-- SQLite Scheduler
-- 分组批量选择
-- 发布间隔
-- Browser Warm Session TTL
-- Task Timeline / Stage / 性能数据
-- `needs_review` 人工确认
-- Facebook 个人主页 / 公共主页
-- `actor_id / target_id` 强安全门禁
-- 正文、图片、视频、混合媒体
-- Unicode / Emoji（CDP `Input.insertText`）
-- 公共主页 `Next → Post`
-- 个人主页直接 Post
-- 发布结果验证
-- GitHub CI：Backend compile/import + Phase validators + Frontend TypeScript/Vite build
-
-历史实机 PoC 已确认：
-
-```text
-Facebook 个人主页：图文发布成功
-Facebook 公共主页：图文发布成功
-Emoji / 非 BMP Unicode：输入链路已修复并验证
-```
-
-Phase 9 仍要求按真实生产 iX Profile 再完成完整 RC 验收。
-
-### Instagram — Phase 8A Experimental
-
-当前已有：
-
-- Instagram Channel capture
-- `ds_user_id` 稳定身份校验
-- Feed Post Adapter
-- 图片 / 视频 / 多媒体 Feed 发布基础流程
-- 发布中心平台切换
-- 平台无关的 `needs_review` 人工确认
-
-当前不继续扩展：
-
-- Story
-- Reels 深度能力
-- 音乐
-- 协作者
-- Threads
-- X
-
-Facebook RC 通过前冻结进一步平台扩张。
-
----
-
-## 8. 兼容层与 Source of Truth
-
-当前仓库仍保留部分 PoC / 迁移兼容对象，但必须明确边界。
-
-| 对象 | 当前定位 |
-|---|---|
-| `Channel` | **V1 产品级发布目标 Source of Truth** |
-| `PublishPlan` | **V1 发布意图 Source of Truth** |
-| `PublishJob` | **V1 产品级任务** |
-| `PublishAttempt` | **V1 真实执行记录** |
-| `PublishTarget` | Facebook/Instagram 渠道发现与迁移兼容对象 |
-| `Account` | 旧账号兼容模型，不能作为新 Plan 发布目标 |
-| `WorkerTask` | Runtime 基础设施，不是产品层任务模型 |
-| `content_id/profile_id` on formal Job | 旧路径兼容字段；正式 Plan Job 留空 |
-
-新代码不得重新把 `PublishTarget / Account / WorkerTask` 提升为产品层发布 Source of Truth。
-
----
-
-## 9. 前端架构
-
-正式入口：
-
-```text
-frontend/src/main.tsx
-    ↓
-frontend/src/app/router.tsx
-    ↓
-frontend/src/app/layout.tsx
-    ↓
-frontend/src/pages/*
-```
-
-旧 anchor PoC shell 已在 Phase 9 删除：
-
-```text
-frontend/src/App.tsx
-frontend/src/ContentComposer.tsx
-frontend/src/AdminSidebar.tsx
-```
-
-仍保留并被正式页面使用：
-
-```text
-FacebookTargetPanel.tsx
-FacebookFlowConfigPanel.tsx
-InstagramChannelPanel.tsx
-```
-
-它们分别属于账号中心 / 流程中心的功能组件，不是旧入口。
+- Source-owned semantic design tokens
+- React primitives
+- Desktop shell
+- Ctrl/Cmd + K Command Palette
+- 工作台
+- 检查入口
+- 准备 Overview
+- 浏览器环境工作区
+- Profile / Session / Lock / Channel 状态聚合
 
 UI 原则：
 
-- Desktop：Sidebar + Header + Content
-- Table first, Card second
-- 任务/账号/素材/计划详情优先 Drawer
-- Flow 页面可采用 Canvas + Step Inspector + Debug Log
-- 不做大量渐变、巨型圆角、过度 AI SaaS 风格
+- Desktop operations workspace，不做营销型 Dashboard
+- 1440×900 为主要目标，1180×720 为最低桌面尺寸
+- Sidebar + compact topbar
+- Segoe UI Variable / Segoe UI / Inter
+- 低圆角、弱阴影、边框主导
+- Table / dense list first
+- Drawer 用于详情和轻量创建任务
+- 一个局部区域只有一个主要动作
+- 普通 UI 不暴露 WorkerTask ID、FlowRevision ID、ProfileLock 等底层概念
 
----
+迁移期间旧 `/accounts`、`/assets`、`/flows`、`/tasks` 等页面可继续兼容，但新的主入口逐步迁移到 `/prepare/*`、`/run/*` 等 Phase 10 路由。
 
-## 10. V1 功能边界
-
-### V1 要做
-
-- 8 个中心
-- Channel
-- Asset
-- Flow Revision / Step
-- PublishPlan / PublishJob / PublishAttempt
-- Facebook 普通帖子
-- 立即 / 定时发布
-- 多 Channel 批量发布
-- 发布间隔
-- SQLite Scheduler
-- Worker Pool
-- Profile Lock
-- Browser Warm Session
-- Timeline / Stage / 性能数据
-- 普通失败重试
-- `needs_review` 人工确认
-- 配置中心
-
-### V1 当前不做
-
-- AI 文案生成
-- 评论管理
-- 私信管理
-- 粉丝管理
-- 数据分析中心
-- 团队权限 / 审批流
-- SaaS 多租户
-- 任意 JavaScript / Python / Shell Workflow
-- 复杂策略中心
-
----
-
-## 11. 开发阶段状态
+设计文档：
 
 ```text
-Phase 1  ✅ 8 个中心 + 真实页面路由
+docs/phase-10-product-ia-v2.md
+docs/phase-10-core-wireframes-v1.md
+docs/phase-10-desktop-ui-system-v1.md
+docs/phase-10-react-ui-foundation-v1.md
+docs/phase-10-account-groups-batch-tasks-v1.md
+```
+
+---
+
+## 14. 当前实现状态
+
+### 已完成
+
+```text
+Phase 1  ✅ 初始产品中心与真实路由
 Phase 2  ✅ Channel / Plan / Attempt / Flow 领域模型
-Phase 3  ✅ Facebook PoC 迁移到正式产品页面与执行桥
+Phase 3  ✅ Facebook PoC → 正式执行桥
 Phase 4  ✅ SQLite Scheduler
-Phase 5  ✅ 批量发布 / 分组 / 间隔 / Warm Session
-Phase 6  ✅ Timeline / 性能 / needs_review 人工确认
-Phase 7  ✅ Facebook Adapter 组合式收口
-Phase 8  ✅ Instagram Feed Post 基础 Adapter（Experimental）
-Phase 9  🚧 Facebook V1 Release Candidate 收口与实机验收
+Phase 5  ✅ 批量发布 / 间隔 / Warm Session
+Phase 6  ✅ Timeline / 性能 / needs_review
+Phase 7  ✅ Facebook Adapter 收口
+Phase 8  ✅ Instagram Feed 基础 Adapter（Experimental）
+Phase 9  ✅ Facebook V1 RC 代码链与自动验证
+Phase 10A ✅ React Desktop UI Foundation
+Phase 10B ✅ Prepare / Browser Environment 第一版
 ```
 
-Phase 9 自动 RC gate：
+### 仍需实机确认
+
+Facebook V1 RC 的最终 Windows + iXBrowser + Facebook 真实环境验收仍需要在用户本机完成。CI 成功不等于完成真实平台实机验收。
+
+### Phase 10 当前开发顺序
 
 ```text
-backend/validate_phase9.py
+1. iXBrowser Runtime 管理补全
+   └─ 工作台创建 / 更新 / 删除 Profile
+
+2. Network / Proxy
+   └─ Proxy / Exit IP / Profile assignment
+
+3. AccountGroup + SocialAccount
+   └─ 分组、稳定 Profile 绑定、默认 Channel
+
+4. Credential Vault / Cookie Session
+   └─ Windows Credential Manager / DPAPI
+
+5. Login Engine
+   └─ Existing Session → Cookie → Password → TOTP → Manual
+
+6. Group Batch Operations
+   └─ 登录检查 / 恢复登录 / IP 检查 / 健康检查
+
+7. 发布直接选择分组
+   └─ Resolve + Snapshot + PublishJobs
+
+8. Browser Workspace / Human Takeover
+
+9. Tauri Windows Shell
 ```
 
-完整验收清单：
-
-```text
-docs/phase-9-facebook-v1-rc.md
-```
-
-**Phase 9 完成前，不继续扩展 Threads / X，也不继续堆 Instagram 新能力。**
+Instagram / Threads / X 的扩展不是当前优先级；当前优先完成 Facebook 与桌面批量工作流。
 
 ---
 
-## 12. 本地运行
+## 15. 本地运行
 
 ### iXBrowser Local API
 
@@ -554,6 +729,8 @@ docs/phase-9-facebook-v1-rc.md
 ```text
 http://127.0.0.1:53200/api/v2/
 ```
+
+需要本机安装并启动 iXBrowser，并启用 Local API。
 
 ### Backend
 
@@ -573,7 +750,7 @@ npm install
 npm run dev
 ```
 
-Web Admin：
+Web UI：
 
 ```text
 http://127.0.0.1:5173
@@ -597,24 +774,19 @@ Media：
 data/uploads/
 ```
 
-Facebook 本地流程关键词：
-
-```text
-data/facebook_flow.json
-```
-
 ---
 
-## 13. GitHub / 本地开发约定
+## 16. GitHub / 本地数据规则
 
 GitHub `main` 是源代码 Source of Truth。
 
-本地自动镜像只同步源码；运行时数据必须留在本地。
+运行时数据、账号凭据和本机环境必须留在本地。
 
-不要提交：
+严禁提交：
 
 - 密码
 - Cookies
+- TOTP Secret
 - API Token
 - Proxy Credentials
 - Facebook / Instagram Session Secrets
@@ -624,34 +796,31 @@ GitHub `main` 是源代码 Source of Truth。
 
 ---
 
-## 14. 安全与使用范围
+## 17. 新聊天接续说明
 
-系统只用于用户有权管理的账号、主页和渠道。
+继续开发前优先读取本 README。
 
-明确不做：
-
-- 绕过 CAPTCHA
-- 绕过 Checkpoint
-- 绕过登录 / 账号恢复机制
-- 绕过平台访问控制
-- 规避安全挑战
-
-遇到登录、Checkpoint 或安全验证，任务进入人工处理。
-
----
-
-## 15. 新聊天接续说明
-
-继续开发前先读取本 README 和 `docs/phase-9-facebook-v1-rc.md`。
-
-当前最高优先级：
+当前产品方向不要重新讨论：
 
 ```text
-Facebook V1 RC
-→ CI 全部通过
-→ 本地 iXBrowser 实机验收
-→ 修复验收中发现的问题
-→ Facebook V1 stable
+Social Publisher = 主工作台
+IXBrowser = Browser Runtime Provider
 ```
 
-不要重新从 Phase 1 开始，也不要在 Facebook RC 完成前继续扩平台功能。
+当前用户操作模型：
+
+```text
+账号 → 分组 → 动作 → 自动执行 → 只处理异常
+```
+
+当前登录策略：
+
+```text
+Existing Session
+→ Cookie / Session Restore
+→ Password
+→ Built-in TOTP
+→ Manual 2FA / Checkpoint
+```
+
+当前开发任务从 **iXBrowser Runtime 管理补全** 继续，然后进入 AccountGroup、Credential/Cookie、Login Engine 和分组批量任务。
