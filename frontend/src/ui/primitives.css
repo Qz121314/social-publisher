@@ -1,0 +1,315 @@
+html,
+body,
+#root {
+  min-width: 1180px;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sp-font-sans);
+  color: var(--sp-text);
+  background: var(--sp-app-bg);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.sp-button {
+  height: var(--sp-control-h-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--sp-radius-sm);
+  background: transparent;
+  color: var(--sp-text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.sp-button:focus-visible,
+.sp-icon-button:focus-visible,
+.sp-command-trigger:focus-visible,
+.sp-nav-item:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.42);
+  outline-offset: 2px;
+}
+
+.sp-button--primary {
+  border-color: var(--sp-accent);
+  background: var(--sp-accent);
+  color: #fff;
+}
+
+.sp-button--primary:hover:not(:disabled) {
+  border-color: var(--sp-accent-hover);
+  background: var(--sp-accent-hover);
+}
+
+.sp-button--secondary {
+  border-color: var(--sp-border-strong);
+  background: var(--sp-surface);
+  color: var(--sp-text-secondary);
+}
+
+.sp-button--secondary:hover:not(:disabled) {
+  border-color: #bcc4cf;
+  background: var(--sp-surface-hover);
+  color: var(--sp-text);
+}
+
+.sp-button--ghost {
+  color: var(--sp-text-secondary);
+}
+
+.sp-button--ghost:hover:not(:disabled) {
+  background: var(--sp-surface-hover);
+  color: var(--sp-text);
+}
+
+.sp-button--danger {
+  border-color: #e9b7b3;
+  background: #fff;
+  color: var(--sp-danger);
+}
+
+.sp-button--danger:hover:not(:disabled) {
+  background: var(--sp-danger-soft);
+}
+
+.sp-button:disabled {
+  opacity: 0.5;
+}
+
+.sp-icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--sp-radius-sm);
+  background: transparent;
+  color: var(--sp-text-secondary);
+}
+
+.sp-icon-button:hover {
+  border-color: var(--sp-border);
+  background: var(--sp-surface-hover);
+  color: var(--sp-text);
+}
+
+.sp-status {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--sp-radius-xs);
+  background: var(--sp-neutral-soft);
+  color: var(--sp-neutral);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sp-status::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.sp-status--success { background: var(--sp-success-soft); color: var(--sp-success); }
+.sp-status--warning { background: var(--sp-warning-soft); color: var(--sp-warning); }
+.sp-status--danger { background: var(--sp-danger-soft); color: var(--sp-danger); }
+.sp-status--info { background: var(--sp-info-soft); color: var(--sp-info); }
+.sp-status--neutral { background: var(--sp-neutral-soft); color: var(--sp-neutral); }
+
+.sp-panel {
+  min-width: 0;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-surface);
+}
+
+.sp-panel-header {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--sp-divider);
+}
+
+.sp-panel-heading {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sp-panel-heading h2,
+.sp-panel-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.sp-panel-heading span {
+  color: var(--sp-text-muted);
+  font-size: 11px;
+}
+
+.sp-panel-body {
+  min-width: 0;
+}
+
+.sp-list {
+  display: grid;
+}
+
+.sp-list-row {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--sp-divider);
+}
+
+.sp-list-row:last-child {
+  border-bottom: 0;
+}
+
+.sp-list-row:hover {
+  background: #fcfcfd;
+}
+
+.sp-list-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sp-list-row-title {
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-list-row-meta {
+  overflow: hidden;
+  color: var(--sp-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8ebef;
+}
+
+.sp-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sp-accent);
+  transition: width 180ms ease;
+}
+
+.sp-empty {
+  min-height: 128px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--sp-text-muted);
+  text-align: center;
+}
+
+.sp-empty strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.sp-workspace-header {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.sp-workspace-header-copy {
+  min-width: 0;
+}
+
+.sp-workspace-header h1 {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.sp-workspace-header p {
+  margin: 5px 0 0;
+  color: var(--sp-text-muted);
+  font-size: 12px;
+}
+
+.sp-workspace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-inline-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #efd3a7;
+  border-radius: var(--sp-radius-sm);
+  background: #fffbf3;
+  color: #795318;
+  font-size: 12px;
+  line-height: 1.5;
+}
