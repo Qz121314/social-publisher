@@ -10,6 +10,7 @@ from app.api.account_groups import router as account_groups_router
 from app.api.account_login import router as account_login_router
 from app.database import get_db
 from app.models.account import Account, AccountGroup, BrowserProfile
+from app.models.resource_pool import ProxyEndpoint
 from app.schemas.account import (
     AccountBatchMove,
     AccountCreate,
@@ -42,6 +43,7 @@ def list_accounts(
         .options(
             selectinload(Account.browser_profile),
             selectinload(Account.group),
+            selectinload(Account.proxy_endpoint),
         )
         .order_by(Account.created_at.desc())
     )
@@ -58,8 +60,11 @@ def list_accounts(
 
 @router.post("", response_model=AccountRead, status_code=status.HTTP_201_CREATED)
 def create_account(payload: AccountCreate, db: Session = Depends(get_db)) -> Account:
-    _require_profile(db, payload.ix_profile_id)
+    if payload.ix_profile_id is not None:
+        _require_profile(db, payload.ix_profile_id)
     _require_group(db, payload.group_id)
+    if payload.proxy_id is not None:
+        _require_proxy(db, payload.proxy_id)
 
     account = Account(**payload.model_dump())
     db.add(account)
@@ -84,13 +89,10 @@ def onboard_account(
     payload: AccountOnboardCreate,
     db: Session = Depends(get_db),
 ) -> AccountOnboardRead:
-    """Create one social account together with its real iXBrowser environment.
+    """Compatibility path for manually creating one account + iX environment.
 
-    New-account onboarding is intentionally the product-level entry point. It
-    creates the persistent iX Profile, optionally applies SOCKS5 directly via
-    the official Local API, creates the Account binding and opens the real
-    browser window. Proxy credentials are never written to Social Publisher's
-    SQLite database.
+    Phase 10 primary onboarding is now resource-pool preparation followed by a
+    batch login task. This endpoint remains available for one-off/manual imports.
     """
 
     _require_group(db, payload.group_id)
@@ -201,10 +203,12 @@ def update_account(
         raise HTTPException(status_code=404, detail="未找到该社交账号。")
 
     changes = payload.model_dump(exclude_unset=True)
-    if "ix_profile_id" in changes:
+    if "ix_profile_id" in changes and changes["ix_profile_id"] is not None:
         _require_profile(db, changes["ix_profile_id"])
     if "group_id" in changes:
         _require_group(db, changes["group_id"])
+    if "proxy_id" in changes and changes["proxy_id"] is not None:
+        _require_proxy(db, changes["proxy_id"])
 
     for key, value in changes.items():
         setattr(account, key, value)
@@ -307,12 +311,20 @@ def _require_group(db: Session, group_id: int | None) -> AccountGroup | None:
     return group
 
 
+def _require_proxy(db: Session, proxy_id: int) -> ProxyEndpoint:
+    endpoint = db.get(ProxyEndpoint, proxy_id)
+    if endpoint is None:
+        raise HTTPException(status_code=400, detail="IP池中的 SOCKS5 不存在。")
+    return endpoint
+
+
 def _get_account_or_404(db: Session, account_id: int) -> Account:
     statement = (
         select(Account)
         .options(
             selectinload(Account.browser_profile),
             selectinload(Account.group),
+            selectinload(Account.proxy_endpoint),
         )
         .where(Account.id == account_id)
     )
