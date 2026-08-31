@@ -16,6 +16,7 @@ from app.services.platforms.base import (
     emit_platform_progress,
 )
 from app.services.platforms.facebook_components import FacebookComponentSet
+from app.services.platforms.facebook_executor_v2 import FacebookExecutorV2
 from app.services.platforms.facebook_surface import _ACTIVE_SURFACE_CONTENT
 from app.services.platforms.facebook_target import _ACTIVE_PUBLISH_CONTENT
 from app.services.platforms.facebook_unicode_flow import UnicodeFacebookFlowAdapter
@@ -46,7 +47,9 @@ class FacebookCompositeAdapter(PlatformAdapter):
         self,
         primitives: UnicodeFacebookFlowAdapter | None = None,
     ) -> None:
-        self._primitives = primitives or UnicodeFacebookFlowAdapter()
+        # FacebookExecutorV2 is the production primitive set. The wider annotation
+        # remains intentionally compatible with the no-browser contract harnesses.
+        self._primitives = primitives or FacebookExecutorV2()
         self.components = FacebookComponentSet.build(self._primitives)
 
     def check_login(self, driver: Chrome) -> dict[str, Any]:
@@ -121,7 +124,7 @@ class FacebookCompositeAdapter(PlatformAdapter):
                     {"media_ms": media_ms, "media_count": len(content.media)},
                 )
 
-            emit_platform_progress("advancing", "检查 Next / Post 发布流程")
+            emit_platform_progress("advancing", "检查 Facebook 可观察发布状态")
             post_button = self.components.submit.wait_ready(driver, composer)
             emit_platform_progress(
                 "checking_identity",
@@ -139,7 +142,7 @@ class FacebookCompositeAdapter(PlatformAdapter):
                 "Facebook 发帖界面在超时时间内没有进入可发布状态。页面结构可能变化，或媒体仍在处理。"
             ) from exc
         except WebDriverException as exc:
-            raise PlatformPublishError(f"Facebook 发布前浏览器自动化失败：{exc}") from exc
+            raise PlatformPublishError(f"Facebook 发布前浏览器自动化失败：{type(exc).__name__}") from exc
 
         # From this point forward at least one final Post click has happened. Any
         # uncertainty must remain needs_review to prevent duplicate submissions.
