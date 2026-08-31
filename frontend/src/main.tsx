@@ -19,6 +19,7 @@ import './pages/Prepare/prepare.css'
 import './pages/Prepare/environment-create.css'
 import './pages/Prepare/social-accounts.css'
 import './pages/Prepare/account-auth.css'
+import './pages/Prepare/account-login.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
