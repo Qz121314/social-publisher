@@ -10,7 +10,11 @@ def main() -> None:
     init_db()
     assert inspect(engine).has_table("account_login_identities"), "account_login_identities table is missing"
 
-    paths = {route.path for route in app.routes}
+    paths = {
+        path
+        for route in app.routes
+        if (path := getattr(route, "path", None)) is not None
+    }
     assert "/api/accounts/auth/{account_id}" in paths
     assert "/api/accounts/{account_id}/login/recover" in paths
     assert "/api/accounts/{account_id}/login/check" in paths
