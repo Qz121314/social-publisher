@@ -17,7 +17,7 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r backend/requirements.txt
       - name: Compile backend
-        run: python -m compileall -q backend/app backend/validate_phase3.py backend/validate_phase4.py backend/validate_phase5.py backend/validate_phase6.py backend/validate_phase7.py backend/validate_phase8.py backend/validate_phase8_origin.py backend/validate_phase9.py backend/validate_facebook_media_interaction.py backend/validate_facebook_post_submit_interstitial.py
+        run: python -m compileall -q backend/app backend/validate_phase3.py backend/validate_phase4.py backend/validate_phase5.py backend/validate_phase6.py backend/validate_phase7.py backend/validate_phase8.py backend/validate_phase8_origin.py backend/validate_phase9.py backend/validate_facebook_media_interaction.py backend/validate_facebook_post_submit_interstitial.py backend/validate_facebook_executor_v2.py
       - name: Import FastAPI application
         working-directory: backend
         run: python -c "from app.main import app; print(app.version)"
@@ -57,6 +57,9 @@ jobs:
       - name: Validate Facebook post-submit interstitial
         working-directory: backend
         run: python validate_facebook_post_submit_interstitial.py
+      - name: Validate Facebook executor v2 safeguards
+        working-directory: backend
+        run: python validate_facebook_executor_v2.py
 
   frontend:
     runs-on: ubuntu-latest
