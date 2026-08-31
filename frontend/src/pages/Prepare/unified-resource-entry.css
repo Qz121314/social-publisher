@@ -12,7 +12,7 @@
   padding: 3px;
   border: 1px solid var(--sp-border);
   border-radius: var(--sp-radius-md);
-  background: var(--sp-surface-muted);
+  background: var(--sp-surface-subtle);
 }
 
 .resource-mode-switch button {
