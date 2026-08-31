@@ -15,6 +15,7 @@ import './app/phase6.css'
 import './ui/tokens.css'
 import './ui/primitives.css'
 import './app/desktop-shell.css'
+import './pages/Prepare/prepare.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
