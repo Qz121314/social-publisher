@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -24,6 +25,33 @@ class BrowserProfile(Base):
     )
 
     accounts: Mapped[list["Account"]] = relationship(back_populates="browser_profile")
+
+    def _safe_profile_metadata(self) -> dict[str, object]:
+        try:
+            value = json.loads(self.raw_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @property
+    def proxy_type(self) -> str | None:
+        value = self._safe_profile_metadata().get("proxy_type")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def proxy_ip(self) -> str | None:
+        value = self._safe_profile_metadata().get("proxy_ip")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def proxy_port(self) -> str | None:
+        value = self._safe_profile_metadata().get("proxy_port")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def real_ip(self) -> str | None:
+        value = self._safe_profile_metadata().get("real_ip")
+        return str(value) if value not in (None, "") else None
 
 
 class AccountGroup(Base):
