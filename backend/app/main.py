@@ -2,7 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
 
+from app.api.asset_pool import router as asset_pool_router
 from app.api.batch_tasks import router as batch_tasks_router
+from app.api.resource_entries import router as resource_entries_router
 from app.api.routes import router
 from app.api.tasks import router as tasks_router
 from app.database import init_db
@@ -45,6 +47,8 @@ app = FastAPI(
 app.include_router(router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 app.include_router(batch_tasks_router, prefix="/api")
+app.include_router(resource_entries_router, prefix="/api")
+app.include_router(asset_pool_router, prefix="/api")
 
 
 @app.get("/")

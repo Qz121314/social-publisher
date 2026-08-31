@@ -1,0 +1,108 @@
+.resource-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-surface-subtle);
+}
+
+.resource-mode-switch button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--sp-radius-sm);
+  background: transparent;
+  color: var(--sp-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.resource-mode-switch button.is-active {
+  background: var(--sp-surface);
+  color: var(--sp-text);
+  box-shadow: 0 0 0 1px var(--sp-border);
+}
+
+.asset-pool-table {
+  display: grid;
+  min-width: 980px;
+}
+
+.asset-pool-row {
+  display: grid;
+  grid-template-columns: 34px minmax(210px, 1.5fr) 90px 100px 90px 150px 110px;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--sp-divider);
+}
+
+.asset-pool-row--head {
+  min-height: 38px;
+  border-top: 0;
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.asset-pool-primary {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.asset-pool-primary strong,
+.asset-pool-primary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-pool-primary strong {
+  color: var(--sp-text);
+  font-size: 12px;
+}
+
+.asset-pool-primary span {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+}
+
+.asset-pool-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.asset-pool-actions button,
+.sp-inline-link {
+  border: 0;
+  background: transparent;
+  color: var(--sp-text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.asset-pool-actions button:hover,
+.sp-inline-link:hover {
+  color: var(--sp-text);
+}
+
+@media (max-width: 760px) {
+  .resource-entry-grid {
+    grid-template-columns: 1fr;
+  }
+}
