@@ -8,6 +8,7 @@ import DashboardPage from '../pages/Dashboard'
 import FlowsPage from '../pages/Flows'
 import PlansPage from '../pages/Plans'
 import PublisherPage from '../pages/Publisher'
+import ReviewPage from '../pages/Review'
 import SettingsPage from '../pages/Settings'
 import TasksPage from '../pages/Tasks'
 
@@ -23,6 +24,7 @@ export default function AppRouter() {
           <Route path="publish" element={<PublisherPage />} />
           <Route path="plans" element={<PlansPage />} />
           <Route path="tasks" element={<TasksPage />} />
+          <Route path="review" element={<ReviewPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
