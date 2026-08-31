@@ -53,6 +53,8 @@ class LoginStateMachine:
 
     Browser/Selenium code reports observable outcomes into this machine. The
     machine never retries checkpoints or unknown security states automatically.
+    Only an explicit ``None`` observation means "confirmed logged out" and may
+    advance to the next configured recovery strategy.
     """
 
     def __init__(self, capabilities: LoginCapabilities) -> None:
@@ -78,7 +80,7 @@ class LoginStateMachine:
             self.state = LoginState.WAITING_FOR_USER
         elif result == LoginResult.CHECKPOINT:
             self.state = LoginState.CHECKPOINT
-        elif result == LoginResult.UNKNOWN:
+        elif result is not None:
             self.state = LoginState.NEEDS_REVIEW
         elif self.capabilities.allow_cookie_restore and self.capabilities.cookie_configured:
             self.state = LoginState.RESTORING_COOKIES
@@ -101,7 +103,7 @@ class LoginStateMachine:
             self.state = LoginState.WAITING_FOR_USER
         elif result == LoginResult.CHECKPOINT:
             self.state = LoginState.CHECKPOINT
-        elif result == LoginResult.UNKNOWN:
+        elif result is not None:
             self.state = LoginState.NEEDS_REVIEW
         elif self.capabilities.allow_password_login and self.capabilities.password_configured:
             self.state = LoginState.ENTERING_CREDENTIALS
