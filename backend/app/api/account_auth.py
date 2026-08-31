@@ -18,7 +18,7 @@ from app.services.credential_vault import (
 )
 from app.services.login_engine import LoginCapabilities, build_login_plan, normalize_totp_secret
 
-router = APIRouter(prefix="/account-auth", tags=["account-auth"])
+router = APIRouter(prefix="/auth", tags=["account-auth"])
 
 
 def utcnow() -> datetime:
