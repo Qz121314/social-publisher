@@ -2,7 +2,6 @@ import React from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 import AdminLayout from './layout'
-import AccountsPage from '../pages/Accounts'
 import AssetsPage from '../pages/Assets'
 import DashboardPage from '../pages/Dashboard'
 import FlowsPage from '../pages/Flows'
@@ -10,6 +9,7 @@ import PlansPage from '../pages/Plans'
 import PreparePage from '../pages/Prepare'
 import BrowserEnvironmentsPage from '../pages/Prepare/BrowserEnvironments'
 import NetworkPage from '../pages/Prepare/NetworkPage'
+import SocialAccountsPage from '../pages/Prepare/SocialAccounts'
 import PublisherPage from '../pages/Publisher'
 import ReviewPage from '../pages/Review'
 import SettingsPage from '../pages/Settings'
@@ -24,8 +24,9 @@ export default function AppRouter() {
           <Route path="prepare" element={<PreparePage />} />
           <Route path="prepare/environments" element={<BrowserEnvironmentsPage />} />
           <Route path="prepare/network" element={<NetworkPage />} />
+          <Route path="prepare/accounts" element={<SocialAccountsPage />} />
           <Route path="assets" element={<AssetsPage />} />
-          <Route path="accounts" element={<AccountsPage />} />
+          <Route path="accounts" element={<Navigate to="/prepare/accounts" replace />} />
           <Route path="flows" element={<FlowsPage />} />
           <Route path="publish" element={<PublisherPage />} />
           <Route path="plans" element={<PlansPage />} />
