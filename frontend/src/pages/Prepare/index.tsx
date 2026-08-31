@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api } from '../../app/api'
-import { AccountIcon, AssetIcon, BrowserIcon, FlowIcon, NetworkIcon } from '../../ui/icons'
+import { AccountIcon, AssetIcon, BrowserIcon, FlowIcon } from '../../ui/icons'
 import { Button, Panel, StatusChip, WorkspaceHeader } from '../../ui/components'
 import PrepareNav from './PrepareNav'
 
@@ -16,7 +16,17 @@ type BrowserProfile = {
   profile_id: number
   name: string
   group_name?: string | null
+  proxy_type?: string | null
+  proxy_ip?: string | null
+  proxy_port?: string | null
+  real_ip?: string | null
   is_available: boolean
+}
+
+type Account = {
+  id: number
+  enabled: boolean
+  status: string
 }
 
 type Channel = {
@@ -42,9 +52,12 @@ type ReadinessItem = {
   meta: string
 }
 
+const loggedInStates = new Set(['logged_in', 'healthy', 'ok', 'ready'])
+
 export default function PreparePage() {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const [assets, setAssets] = useState<Asset[]>([])
   const [flows, setFlows] = useState<Flow[]>([])
@@ -52,15 +65,17 @@ export default function PreparePage() {
 
   const load = async () => {
     try {
-      const [nextRuntime, nextProfiles, nextChannels, nextAssets, nextFlows] = await Promise.all([
+      const [nextRuntime, nextProfiles, nextAccounts, nextChannels, nextAssets, nextFlows] = await Promise.all([
         api<RuntimeStatus>('/api/status'),
         api<BrowserProfile[]>('/api/browser-profiles'),
+        api<Account[]>('/api/accounts'),
         api<Channel[]>('/api/channels'),
         api<Asset[]>('/api/assets?limit=100'),
         api<Flow[]>('/api/flows'),
       ])
       setRuntime(nextRuntime)
       setProfiles(nextProfiles)
+      setAccounts(nextAccounts)
       setChannels(nextChannels)
       setAssets(nextAssets)
       setFlows(nextFlows)
@@ -78,47 +93,41 @@ export default function PreparePage() {
 
   const items = useMemo<ReadinessItem[]>(() => {
     const availableProfiles = profiles.filter((item) => item.is_available).length
+    const socks5Profiles = profiles.filter((item) => item.proxy_type === 'socks5' && item.proxy_ip && item.proxy_port).length
+    const detectedExitIps = profiles.filter((item) => item.real_ip).length
+    const enabledAccounts = accounts.filter((item) => item.enabled)
+    const loggedInAccounts = enabledAccounts.filter((item) => loggedInStates.has(item.status)).length
     const healthyChannels = channels.filter((item) => item.enabled && ['healthy', 'ok', 'running'].includes(item.health_status)).length
     const enabledChannels = channels.filter((item) => item.enabled).length
     const activeFlows = flows.filter((item) => item.enabled && item.current_revision_id).length
 
     const browserTone = runtime?.ixbrowser?.connected && availableProfiles > 0 ? 'success' : 'danger'
-    const accountTone = enabledChannels === 0 ? 'warning' : healthyChannels === enabledChannels ? 'success' : 'warning'
+    const accountTone = enabledAccounts.length > 0 && loggedInAccounts === enabledAccounts.length ? 'success' : 'warning'
     const assetTone = assets.length > 0 ? 'success' : 'warning'
     const flowTone = activeFlows > 0 ? 'success' : 'warning'
 
     return [
       {
         key: 'browser',
-        title: '浏览器环境',
-        description: 'iXBrowser Profile、会话状态与人工打开/关闭。',
+        title: '浏览器环境 + SOCKS5',
+        description: 'iXBrowser Profile、SOCKS5、出口 IP 与真实浏览器会话统一管理。',
         href: '/prepare/environments',
         icon: BrowserIcon,
         tone: browserTone,
-        status: browserTone === 'success' ? '已就绪' : '需要检查',
+        status: browserTone === 'success' ? '已连接' : '需要检查',
         meta: runtime?.ixbrowser?.connected
-          ? `${availableProfiles} / ${profiles.length} 个环境可用 · ${runtime.browser_pool?.total_sessions ?? 0} 个已打开会话`
+          ? `${availableProfiles} / ${profiles.length} 个环境可用 · ${socks5Profiles} 个配置 SOCKS5 · ${detectedExitIps} 个有出口 IP`
           : 'iXBrowser Local API 未连接',
-      },
-      {
-        key: 'network',
-        title: '网络 / IP',
-        description: 'Proxy、出口 IP、连接质量与环境绑定。',
-        href: '/prepare/network',
-        icon: NetworkIcon,
-        tone: 'neutral',
-        status: '待接入',
-        meta: '当前版本尚未建立独立 Proxy / IP 服务，不展示模拟数据。',
       },
       {
         key: 'accounts',
         title: '社交账号',
-        description: 'Facebook / Instagram 登录身份与正式 Channel。',
-        href: '/accounts',
+        description: '创建账号时直接创建/绑定 iX 环境、配置 SOCKS5，并在真实窗口完成登录。',
+        href: '/prepare/accounts',
         icon: AccountIcon,
         tone: accountTone,
-        status: accountTone === 'success' ? '已就绪' : '需要检查',
-        meta: `${enabledChannels} 个启用 Channel · ${healthyChannels} 个状态正常`,
+        status: accountTone === 'success' ? '已登录' : '需要准备',
+        meta: `${enabledAccounts.length} 个启用账号 · ${loggedInAccounts} 个已登录 · ${healthyChannels} / ${enabledChannels} 个 Channel 正常`,
       },
       {
         key: 'assets',
@@ -141,15 +150,16 @@ export default function PreparePage() {
         meta: `${activeFlows} 个启用且绑定当前 Revision 的流程`,
       },
     ]
-  }, [runtime, profiles, channels, assets, flows])
+  }, [runtime, profiles, accounts, channels, assets, flows])
 
   const readyCount = items.filter((item) => item.tone === 'success').length
+  const allReady = readyCount === items.length
 
   return (
     <main className="prepare-workspace">
       <WorkspaceHeader
         title="准备"
-        description="在创建发布之前检查浏览器、账号、素材和流程是否已经具备执行条件。"
+        description="账号、iX 环境、SOCKS5 和登录现在按同一条工作流准备，不再拆成独立网络中心。"
         actions={<Button variant="primary" onClick={load}>重新检查</Button>}
       />
       <PrepareNav />
@@ -160,9 +170,9 @@ export default function PreparePage() {
         <div>
           <span>整体准备度</span>
           <strong>{readyCount} / {items.length}</strong>
-          <small>这里只统计当前已经真实接入的数据源；网络 / IP 在独立服务完成前保持“待接入”。</small>
+          <small>网络是 iX 浏览器环境的一部分：工作台只展示安全的 SOCKS5 Host / Port 与出口 IP，不显示代理密码。</small>
         </div>
-        <StatusChip tone={readyCount >= 4 ? 'success' : 'warning'}>{readyCount >= 4 ? '可继续准备发布' : '存在未完成准备项'}</StatusChip>
+        <StatusChip tone={allReady ? 'success' : 'warning'}>{allReady ? '已具备发布条件' : '存在未完成准备项'}</StatusChip>
       </div>
 
       <Panel title="发布前条件" meta="按真实运行依赖排序">
