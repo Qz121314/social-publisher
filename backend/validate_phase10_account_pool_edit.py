@@ -2,8 +2,8 @@ from uuid import uuid4
 
 from sqlalchemy import delete
 
+from app.api.account_import_preview import preview_account_pool_import
 from app.api.accounts import edit_accounts_batch
-from app.api.resource_pools import preview_account_pool_import
 from app.database import SessionLocal, init_db
 from app.main import app
 from app.models.account import Account, AccountGroup

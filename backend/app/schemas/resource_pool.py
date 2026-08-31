@@ -34,6 +34,15 @@ class ProxyBatchDelete(BaseModel):
     proxy_ids: list[int] = Field(min_length=1, max_length=1000)
 
 
+class ProxyHealthCheckRequest(BaseModel):
+    proxy_ids: list[int] = Field(min_length=1, max_length=200)
+
+    @field_validator("proxy_ids")
+    @classmethod
+    def unique_proxy_ids(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
+
+
 class AccountPoolImportText(BaseModel):
     """CSV import payload for account-pool preparation.
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.models.account import Account, AccountGroup
@@ -12,11 +13,10 @@ from app.models.auth import AccountAuthConfig
 from app.models.resource_pool import ProxyEndpoint
 from app.schemas.resource_pool import (
     AccountBatchProxyAssign,
-    AccountImportPreview,
-    AccountImportPreviewRow,
     AccountPoolImportText,
     ProxyBatchDelete,
     ProxyEndpointRead,
+    ProxyHealthCheckRequest,
     ProxyImportText,
 )
 from app.services.cookie_session import CookieSessionError, normalize_cookie_payload
@@ -30,6 +30,7 @@ from app.services.credential_vault import (
     proxy_secret_reference,
 )
 from app.services.login_engine import normalize_totp_secret
+from app.services.proxy_health import ProxyHealthResult, check_socks5_proxy
 from app.services.resource_pool import (
     AccountImportRow,
     ResourcePoolImportError,
@@ -120,6 +121,96 @@ def import_proxy_pool(payload: ProxyImportText, db: Session = Depends(get_db)) -
     }
 
 
+@router.post("/proxy-pool/check")
+def check_proxy_pool(
+    payload: ProxyHealthCheckRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    ids = payload.proxy_ids
+    endpoints = list(db.scalars(select(ProxyEndpoint).where(ProxyEndpoint.id.in_(ids))).all())
+    endpoint_by_id = {item.id: item for item in endpoints}
+    missing = [item for item in ids if item not in endpoint_by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"未找到 IP：{', '.join(map(str, missing[:10]))}")
+
+    results: dict[int, ProxyHealthResult] = {}
+    prepared: dict[int, tuple[str, int, str | None, str | None]] = {}
+    for endpoint in endpoints:
+        try:
+            username = (
+                credential_vault.get_text(proxy_secret_reference(endpoint.id, "username"))
+                if endpoint.username_configured
+                else None
+            )
+            password = (
+                credential_vault.get_text(proxy_secret_reference(endpoint.id, "password"))
+                if endpoint.password_configured
+                else None
+            )
+            prepared[endpoint.id] = (endpoint.host, endpoint.port, username, password)
+        except CredentialVaultError:
+            results[endpoint.id] = ProxyHealthResult(status="error", error_code="credential")
+
+    if prepared:
+        workers = min(12, len(prepared))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="proxy-health") as executor:
+            futures = {
+                executor.submit(
+                    check_socks5_proxy,
+                    host=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                ): proxy_id
+                for proxy_id, (host, port, username, password) in prepared.items()
+            }
+            for future in as_completed(futures):
+                proxy_id = futures[future]
+                try:
+                    results[proxy_id] = future.result()
+                except Exception:
+                    results[proxy_id] = ProxyHealthResult(status="error", error_code="internal")
+
+    checked_at = utcnow()
+    response_items: list[dict[str, object]] = []
+    for proxy_id in ids:
+        endpoint = endpoint_by_id[proxy_id]
+        result = results.get(proxy_id, ProxyHealthResult(status="error", error_code="internal"))
+        endpoint.status = result.status
+        endpoint.last_checked_at = checked_at
+        if result.status == "healthy":
+            endpoint.exit_ip = result.exit_ip
+            endpoint.country = result.country
+            endpoint.region = result.region
+            endpoint.latency_ms = result.latency_ms
+        else:
+            endpoint.exit_ip = None
+            endpoint.country = None
+            endpoint.region = None
+            endpoint.latency_ms = None
+        response_items.append(
+            {
+                "proxy_id": endpoint.id,
+                "status": result.status,
+                "exit_ip": result.exit_ip,
+                "country": result.country,
+                "region": result.region,
+                "latency_ms": result.latency_ms,
+                "error_code": result.error_code,
+            }
+        )
+
+    db.commit()
+    healthy = sum(1 for item in response_items if item["status"] == "healthy")
+    return {
+        "status": "ok",
+        "checked": len(response_items),
+        "healthy": healthy,
+        "error": len(response_items) - healthy,
+        "results": response_items,
+    }
+
+
 @router.post("/proxy-pool/batch/delete")
 def delete_proxy_pool(payload: ProxyBatchDelete, db: Session = Depends(get_db)) -> dict[str, object]:
     ids = list(dict.fromkeys(payload.proxy_ids))
@@ -129,7 +220,9 @@ def delete_proxy_pool(payload: ProxyBatchDelete, db: Session = Depends(get_db)) 
     if missing:
         raise HTTPException(status_code=404, detail=f"未找到 IP：{', '.join(map(str, missing[:10]))}")
 
-    assigned = set(db.scalars(select(Account.proxy_id).where(Account.proxy_id.in_(ids))).all())
+    assigned = set(
+        db.scalars(select(Account.proxy_id).where(Account.proxy_id.in_(ids))).all()
+    )
     assigned.discard(None)
     if assigned:
         raise HTTPException(
@@ -142,90 +235,6 @@ def delete_proxy_pool(payload: ProxyBatchDelete, db: Session = Depends(get_db)) 
         db.delete(endpoint)
     db.commit()
     return {"status": "ok", "deleted": len(endpoints)}
-
-
-@router.post("/account-pool/import/preview", response_model=AccountImportPreview)
-def preview_account_pool_import(
-    payload: AccountPoolImportText,
-    db: Session = Depends(get_db),
-) -> AccountImportPreview:
-    """Validate a CSV before import without returning secrets to the browser."""
-
-    try:
-        rows = parse_account_import_csv(payload.text)
-        prepared = [_prepare_account_row(row) for row in rows]
-    except (ResourcePoolImportError, CookieSessionError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    existing_identifiers = {
-        (platform, identifier.lower())
-        for platform, identifier in db.execute(
-            select(Account.platform, AccountAuthConfig.login_identifier)
-            .join(AccountAuthConfig, AccountAuthConfig.account_id == Account.id)
-            .where(AccountAuthConfig.login_identifier.is_not(None))
-        ).all()
-        if identifier
-    }
-    existing_groups = {item.name.lower() for item in db.scalars(select(AccountGroup)).all()}
-
-    preview_rows: list[AccountImportPreviewRow] = []
-    groups_to_create: list[str] = []
-    pending_group_names: set[str] = set()
-    seen_identifiers: set[tuple[str, str]] = set()
-    creatable = 0
-    skipped = 0
-
-    try:
-        for row, normalized_totp, normalized_cookies, _cookie_count in prepared:
-            proxy_id = _resolve_proxy_reference(db, row.proxy)
-            identity_key = (
-                (row.platform, row.login_identifier.lower())
-                if row.login_identifier
-                else None
-            )
-            duplicate = bool(
-                identity_key
-                and (identity_key in existing_identifiers or identity_key in seen_identifiers)
-            )
-            if identity_key and not duplicate:
-                seen_identifiers.add(identity_key)
-
-            action = "skip" if duplicate else "create"
-            reason = "相同平台和登录账号已存在，导入时会跳过。" if duplicate else None
-            if duplicate:
-                skipped += 1
-            else:
-                creatable += 1
-                if row.group_name:
-                    group_key = row.group_name.lower()
-                    if group_key not in existing_groups and group_key not in pending_group_names:
-                        pending_group_names.add(group_key)
-                        groups_to_create.append(row.group_name)
-
-            preview_rows.append(
-                AccountImportPreviewRow(
-                    name=row.name,
-                    platform=row.platform,
-                    group_name=row.group_name,
-                    proxy_id=proxy_id,
-                    login_configured=bool(row.login_identifier),
-                    password_configured=bool(row.password),
-                    totp_configured=bool(normalized_totp),
-                    cookie_configured=bool(normalized_cookies),
-                    action=action,
-                    reason=reason,
-                )
-            )
-    except ResourcePoolImportError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return AccountImportPreview(
-        received=len(rows),
-        creatable=creatable,
-        skipped=skipped,
-        groups_to_create=groups_to_create,
-        rows=preview_rows,
-    )
 
 
 @router.post("/account-pool/import")
@@ -246,7 +255,10 @@ def import_account_pool(payload: AccountPoolImportText, db: Session = Depends(ge
         if identifier
     }
 
-    group_by_name = {item.name.lower(): item for item in db.scalars(select(AccountGroup)).all()}
+    group_by_name = {
+        item.name.lower(): item
+        for item in db.scalars(select(AccountGroup)).all()
+    }
     created_account_ids: list[int] = []
     skipped = 0
     seen_identifiers: set[tuple[str, str]] = set()
@@ -354,15 +366,11 @@ def auto_assign_account_proxies(
     if not targets:
         return {"status": "ok", "assigned": 0, "unchanged": len(accounts)}
 
-    target_ids = [item.id for item in targets]
-    used_statement = select(Account.proxy_id).where(Account.proxy_id.is_not(None))
-    if payload.replace_existing and target_ids:
-        used_statement = used_statement.where(Account.id.not_in(target_ids))
-    used_proxy_ids = {
+    used_proxy_ids = set(
         value
-        for value in db.scalars(used_statement).all()
+        for value in db.scalars(select(Account.proxy_id).where(Account.proxy_id.is_not(None))).all()
         if value is not None
-    }
+    )
     candidates = list(
         db.scalars(
             select(ProxyEndpoint)
@@ -410,10 +418,6 @@ def _resolve_proxy_reference(db: Session, value: str | None) -> int | None:
         endpoint = db.get(ProxyEndpoint, int(normalized))
         if endpoint is None:
             raise ResourcePoolImportError(f"指定的 IP #{normalized} 不存在。")
-        if not endpoint.enabled:
-            raise ResourcePoolImportError(f"指定的 IP #{normalized} 已停用。")
-        if endpoint.status == "error":
-            raise ResourcePoolImportError(f"指定的 IP #{normalized} 当前状态异常。")
         return endpoint.id
 
     candidate = normalized
@@ -441,9 +445,4 @@ def _resolve_proxy_reference(db: Session, value: str | None) -> int | None:
         raise ResourcePoolImportError(f"IP池中不存在 {host}:{port}。")
     if len(endpoints) > 1:
         raise ResourcePoolImportError(f"{host}:{port} 对应多条记录，请在 CSV 中填写 IP池 ID。")
-    endpoint = endpoints[0]
-    if not endpoint.enabled:
-        raise ResourcePoolImportError(f"IP池中的 {host}:{port} 已停用。")
-    if endpoint.status == "error":
-        raise ResourcePoolImportError(f"IP池中的 {host}:{port} 当前状态异常。")
-    return endpoint.id
+    return endpoints[0].id
