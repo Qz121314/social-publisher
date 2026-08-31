@@ -3,13 +3,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.account_auth import router as account_auth_router
 from app.api.account_groups import router as account_groups_router
 from app.database import get_db
 from app.models.account import Account, AccountGroup, BrowserProfile
 from app.schemas.account import AccountBatchMove, AccountCreate, AccountRead, AccountUpdate
+from app.services.credential_vault import clear_account_secrets
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 router.include_router(account_groups_router)
+router.include_router(account_auth_router)
 
 
 @router.get("", response_model=list[AccountRead])
@@ -52,7 +55,7 @@ def create_account(payload: AccountCreate, db: Session = Depends(get_db)) -> Acc
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This iX profile is already linked to an account for that platform.",
+            detail="该 iX 环境已经绑定了同平台账号。",
         ) from exc
 
     return _get_account_or_404(db, account.id)
@@ -72,7 +75,7 @@ def move_accounts_to_group(
     if missing:
         raise HTTPException(
             status_code=404,
-            detail=f"Account not found: {', '.join(str(item) for item in missing[:10])}",
+            detail=f"未找到账号：{', '.join(str(item) for item in missing[:10])}",
         )
 
     for account in accounts:
@@ -93,7 +96,7 @@ def update_account(
 ) -> Account:
     account = db.get(Account, account_id)
     if account is None:
-        raise HTTPException(status_code=404, detail="Account not found.")
+        raise HTTPException(status_code=404, detail="未找到该社交账号。")
 
     changes = payload.model_dump(exclude_unset=True)
     if "ix_profile_id" in changes:
@@ -110,7 +113,7 @@ def update_account(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This iX profile is already linked to an account for that platform.",
+            detail="该 iX 环境已经绑定了同平台账号。",
         ) from exc
 
     return _get_account_or_404(db, account_id)
@@ -120,7 +123,8 @@ def update_account(
 def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     account = db.get(Account, account_id)
     if account is None:
-        raise HTTPException(status_code=404, detail="Account not found.")
+        raise HTTPException(status_code=404, detail="未找到该社交账号。")
+    clear_account_secrets(account_id)
     db.delete(account)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -131,7 +135,7 @@ def _require_profile(db: Session, profile_id: int) -> BrowserProfile:
     if profile is None:
         raise HTTPException(
             status_code=400,
-            detail="iX profile is not synced yet. Sync iXBrowser profiles first.",
+            detail="该 iX 环境尚未同步，请先同步 iXBrowser 环境。",
         )
     return profile
 
@@ -141,7 +145,7 @@ def _require_group(db: Session, group_id: int | None) -> AccountGroup | None:
         return None
     group = db.get(AccountGroup, group_id)
     if group is None:
-        raise HTTPException(status_code=400, detail="Account group does not exist.")
+        raise HTTPException(status_code=400, detail="账号分组不存在。")
     return group
 
 
@@ -156,5 +160,5 @@ def _get_account_or_404(db: Session, account_id: int) -> Account:
     )
     account = db.scalar(statement)
     if account is None:
-        raise HTTPException(status_code=404, detail="Account not found.")
+        raise HTTPException(status_code=404, detail="未找到该社交账号。")
     return account
