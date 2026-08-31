@@ -3,11 +3,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.account_groups import router as account_groups_router
 from app.database import get_db
 from app.models.account import Account, AccountGroup, BrowserProfile
 from app.schemas.account import AccountBatchMove, AccountCreate, AccountRead, AccountUpdate
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
+router.include_router(account_groups_router)
 
 
 @router.get("", response_model=list[AccountRead])
