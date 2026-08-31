@@ -6,6 +6,7 @@ import { api } from '../../app/api'
 import { AccountIcon, PlusIcon, SearchIcon } from '../../ui/icons'
 import { Button, EmptyState, StatusChip, WorkspaceHeader } from '../../ui/components'
 import AccountAuthDrawer from './AccountAuthDrawer'
+import AccountLoginControl from './AccountLoginControl'
 import PrepareNav from './PrepareNav'
 
 type AccountGroup = {
@@ -62,15 +63,6 @@ function platformLabel(platform: string) {
   if (platform === 'facebook') return 'Facebook'
   if (platform === 'instagram') return 'Instagram'
   return platform
-}
-
-function loginStatus(status: string) {
-  if (healthyStates.has(status)) return { label: '已登录', tone: 'success' as const }
-  if (status === 'needs_2fa') return { label: '需要二次验证', tone: 'warning' as const }
-  if (status === 'checkpoint') return { label: '安全检查', tone: 'warning' as const }
-  if (status === 'needs_login') return { label: '需要登录', tone: 'warning' as const }
-  if (['error', 'failed'].includes(status)) return { label: '异常', tone: 'danger' as const }
-  return { label: '未检查', tone: 'neutral' as const }
 }
 
 export default function SocialAccountsPage() {
@@ -329,7 +321,7 @@ export default function SocialAccountsPage() {
               <SearchIcon />
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号、环境或发布身份…" />
             </div>
-            <span className="account-toolbar-note">登录凭据配置已接入；下一阶段会把“恢复登录”批量执行接到当前分组。</span>
+            <span className="account-toolbar-note">Facebook 单账号恢复登录已接入真实 iX 环境；批量执行将在单账号闭环验证后复用同一引擎。</span>
           </div>
 
           {selected.length > 0 && (
@@ -355,7 +347,6 @@ export default function SocialAccountsPage() {
             {visibleAccounts.length === 0 ? (
               <EmptyState title="当前没有账号" description="可以添加账号并绑定已有 iX 浏览器环境，或切换到其他分组。" />
             ) : visibleAccounts.map((account) => {
-              const status = loginStatus(account.status)
               const accountChannels = (channelsByProfile.get(account.ix_profile_id) ?? []).filter((channel) => channel.platform === account.platform && channel.enabled)
               return (
                 <div className="account-row" role="row" key={account.id}>
@@ -370,10 +361,12 @@ export default function SocialAccountsPage() {
                     {accountChannels.length === 0 ? <span>未配置</span> : accountChannels.slice(0, 2).map((channel) => <span key={channel.id}>{channel.target_name}</span>)}
                     {accountChannels.length > 2 && <small>+{accountChannels.length - 2}</small>}
                   </div>
-                  <div className="account-login-cell">
-                    <StatusChip tone={status.tone}>{status.label}</StatusChip>
-                    <button type="button" className="account-login-settings" onClick={() => setAuthAccount(account)}>登录设置</button>
-                  </div>
+                  <AccountLoginControl
+                    account={account}
+                    onChanged={load}
+                    onMessage={setMessage}
+                    onOpenSettings={() => setAuthAccount(account)}
+                  />
                 </div>
               )
             })}
