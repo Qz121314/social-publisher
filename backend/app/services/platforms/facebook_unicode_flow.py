@@ -12,10 +12,15 @@ from selenium.common.exceptions import (
     WebDriverException,
 )
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
 
-from app.services.platforms.base import PlatformPublishError
+from app.services.platforms.base import (
+    PlatformContent,
+    PlatformNeedsReviewError,
+    PlatformPublishError,
+)
 from app.services.platforms.facebook_configurable_flow import ConfigurableFacebookFlowAdapter
 
 
@@ -177,6 +182,95 @@ class UnicodeFacebookFlowAdapter(ConfigurableFacebookFlowAdapter):
         # Give Facebook a short render turn before the existing bounded input
         # resolver looks for the composer-owned file input.
         time.sleep(0.2)
+
+    def _resolve_post_submit_interstitial(
+        self,
+        driver: Any,
+        composer: WebElement,
+        content: PlatformContent,
+    ) -> dict[str, Any]:
+        """Bypass Facebook's optional promotion/event upsell after the Post click.
+
+        Some Facebook builds intercept a normal post with a modal such as
+        "正在组织活动?" and offer "发布原帖" plus "继续". ``继续`` enters the
+        promotion/event flow and must never be treated as the ordinary Next action.
+        When an exact publish-original action appears inside a visible dialog, the
+        actor ID is checked again and that action is clicked. Unknown post-click
+        dialogs are left untouched so the existing verifier falls back to
+        ``needs_review`` rather than guessing.
+        """
+
+        keywords = self._keywords("publish_original_keywords")
+        deadline = time.monotonic() + 4.0
+        quiet_since: float | None = None
+
+        while time.monotonic() < deadline:
+            if self._has_security_challenge(driver):
+                raise PlatformNeedsReviewError(
+                    "Facebook 在最终发布后打开了安全验证，请人工处理并确认帖子状态。",
+                    submitted=True,
+                )
+
+            try:
+                if not composer.is_displayed():
+                    return {"handled": False, "reason": "composer_closed"}
+            except StaleElementReferenceException:
+                return {"handled": False, "reason": "composer_closed"}
+
+            button = self._find_publish_original_button(driver, keywords)
+            if button is not None:
+                self._assert_target_actor(driver, content, stage="点击发布原帖前")
+                label = self._element_label(button)
+                self._safe_click(driver, button)
+                return {
+                    "handled": True,
+                    "action": label or keywords[0],
+                }
+
+            # Most normal posts do not show an interstitial. Once the first Post
+            # click has had enough time to render one, return quickly and let the
+            # normal close/verification path continue.
+            if quiet_since is None:
+                quiet_since = time.monotonic()
+            elif time.monotonic() - quiet_since >= 1.4:
+                return {"handled": False, "reason": "no_interstitial"}
+            time.sleep(0.12)
+
+        return {"handled": False, "reason": "no_interstitial"}
+
+    def _find_publish_original_button(
+        self,
+        driver: Any,
+        keywords: tuple[str, ...],
+    ) -> WebElement | None:
+        for text in keywords:
+            literal = self._xpath_literal(text)
+            xpaths = (
+                "//*[(self::button or @role='button') and "
+                f"(normalize-space(.)={literal} or normalize-space(@aria-label)={literal})]",
+                "//*[self::span or self::div][normalize-space(.)="
+                f"{literal}]/ancestor::*[self::button or @role='button'][1]",
+            )
+            for xpath in xpaths:
+                try:
+                    elements = driver.find_elements(By.XPATH, xpath)
+                except WebDriverException:
+                    continue
+                for element in elements:
+                    try:
+                        if not element.is_displayed() or not self._is_enabled(element):
+                            continue
+                        in_dialog = bool(
+                            element.find_elements(
+                                By.XPATH,
+                                "ancestor::*[@role='dialog' or @aria-modal='true'][1]",
+                            )
+                        )
+                        if in_dialog:
+                            return element
+                    except (StaleElementReferenceException, WebDriverException):
+                        continue
+        return None
 
     def _fill_text(self, composer: WebElement, text: str) -> None:
         if not text:
