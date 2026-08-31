@@ -8,8 +8,8 @@ type AccountSummary = {
   name: string
   platform: string
   status: string
-  ix_profile_id: number
-  browser_profile: { name: string }
+  ix_profile_id?: number | null
+  browser_profile?: { name: string } | null
 }
 
 type LoginExecution = {
@@ -26,7 +26,8 @@ type LoginExecution = {
   current_url?: string | null
 }
 
-function statusView(status: string) {
+function statusView(status: string, hasRuntime: boolean) {
+  if (!hasRuntime && status === 'prepared') return { label: '已准备', tone: 'info' as const }
   if (['logged_in', 'healthy', 'ok', 'ready'].includes(status)) return { label: '已登录', tone: 'success' as const }
   if (status === 'needs_2fa') return { label: '需要二次验证', tone: 'warning' as const }
   if (status === 'checkpoint') return { label: '安全检查', tone: 'warning' as const }
@@ -49,8 +50,9 @@ export default function AccountLoginControl({
 }) {
   const [busy, setBusy] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<LoginExecution | null>(null)
-  const status = useMemo(() => statusView(account.status), [account.status])
-  const supported = account.platform === 'facebook'
+  const hasRuntime = Boolean(account.ix_profile_id && account.browser_profile)
+  const status = useMemo(() => statusView(account.status, hasRuntime), [account.status, hasRuntime])
+  const supported = account.platform === 'facebook' && hasRuntime
 
   const recover = async () => {
     if (!supported || busy) return
@@ -91,15 +93,19 @@ export default function AccountLoginControl({
       <div className="account-login-cell">
         <StatusChip tone={status.tone}>{status.label}</StatusChip>
         <div className="account-login-actions">
-          <button
-            type="button"
-            className="account-login-recover"
-            onClick={recover}
-            disabled={!supported || busy}
-            title={supported ? '检查现有登录状态，并只在必要时恢复登录' : '该平台的真实登录执行器尚未接入'}
-          >
-            {busy ? '处理中…' : supported ? '恢复登录' : '暂未接入'}
-          </button>
+          {hasRuntime ? (
+            <button
+              type="button"
+              className="account-login-recover"
+              onClick={recover}
+              disabled={!supported || busy}
+              title={supported ? '检查现有登录状态，并只在必要时恢复登录' : '该平台的真实登录执行器尚未接入'}
+            >
+              {busy ? '处理中…' : supported ? '恢复登录' : '暂未接入'}
+            </button>
+          ) : (
+            <span className="account-login-runtime-note" title="批量登录任务会自动创建并固定绑定 iX 环境">等待批量登录</span>
+          )}
           <button type="button" className="account-login-settings" onClick={onOpenSettings} disabled={busy}>登录设置</button>
         </div>
       </div>
@@ -115,7 +121,7 @@ export default function AccountLoginControl({
               <p className="account-login-confirm-copy">{pendingConfirmation.message}</p>
               <div className="account-login-confirm-summary">
                 <div><span>账号</span><strong>{account.name}</strong></div>
-                <div><span>浏览器环境</span><strong>{account.browser_profile.name} · iX #{account.ix_profile_id}</strong></div>
+                <div><span>浏览器环境</span><strong>{account.browser_profile?.name || '待创建'}{account.ix_profile_id ? ` · iX #${account.ix_profile_id}` : ''}</strong></div>
                 <div><span>检测到的身份 ID</span><strong>{pendingConfirmation.identity_id || '未读取到'}</strong></div>
               </div>
               <div className="account-auth-note">请先查看已经打开的真实 iXBrowser 窗口，确认当前登录账号就是你准备绑定的账号。确认后，后续恢复登录会严格校验这个身份，不会自动覆盖。</div>
