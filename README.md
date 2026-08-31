@@ -493,6 +493,8 @@ Windows 本地使用 DPAPI 加密存储。
 - **账号批量自动分配未占用 IP 基础**
 - **BatchTask / TaskJob 批量登录任务基础与不可变目标 Snapshot**
 - **分组一键批量登录；缺少 Runtime 时按需创建固定 iX Profile 并写入固定 SOCKS5**
+- **运行中心账号任务视图：批次进度、Job 明细、Runtime / 登录阶段、异常结果与自动刷新**
+- **原有 PublishJob 运行历史保留为运行中心“发布任务”子视图**
 
 保留的高级兼容入口：
 
@@ -506,13 +508,12 @@ Windows 本地使用 DPAPI 加密存储。
 ## 11. 接下来开发顺序
 
 ```text
-1. 运行中心展示批量登录进度
-2. 2FA / Checkpoint → 检查中心人工处理
-3. 素材池 ContentPackage
-4. 分组 → 批量发帖
-5. 账号维护任务
-6. Tauri 2 Windows Desktop Shell / Window Manager
-7. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
+1. 2FA / Checkpoint → 检查中心人工处理
+2. 素材池 ContentPackage
+3. 分组 → 批量发帖
+4. 账号维护任务
+5. Tauri 2 Windows Desktop Shell / Window Manager
+6. Messenger Relay：按 `docs/messenger-relay-v1.md` 从 MR-0 安全审计和 POC 开始
 ```
 
 Messenger Relay 已列为正式后续能力，但当前不打断发布主线；待现有发布能力稳定后按独立 MR 阶段开发。
