@@ -8,7 +8,6 @@ import FlowsPage from '../pages/Flows'
 import PlansPage from '../pages/Plans'
 import PreparePage from '../pages/Prepare'
 import BrowserEnvironmentsPage from '../pages/Prepare/BrowserEnvironments'
-import NetworkPage from '../pages/Prepare/NetworkPage'
 import SocialAccountsPage from '../pages/Prepare/SocialAccounts'
 import PublisherPage from '../pages/Publisher'
 import ReviewPage from '../pages/Review'
@@ -23,7 +22,7 @@ export default function AppRouter() {
           <Route index element={<DashboardPage />} />
           <Route path="prepare" element={<PreparePage />} />
           <Route path="prepare/environments" element={<BrowserEnvironmentsPage />} />
-          <Route path="prepare/network" element={<NetworkPage />} />
+          <Route path="prepare/network" element={<Navigate to="/prepare/environments" replace />} />
           <Route path="prepare/accounts" element={<SocialAccountsPage />} />
           <Route path="assets" element={<AssetsPage />} />
           <Route path="accounts" element={<Navigate to="/prepare/accounts" replace />} />

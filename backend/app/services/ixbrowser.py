@@ -1,6 +1,6 @@
 from typing import Any
 
-from ixbrowser_local_api import IXBrowserClient, Profile
+from ixbrowser_local_api import Consts, IXBrowserClient, Profile, Proxy
 
 
 class IXBrowserError(RuntimeError):
@@ -80,13 +80,17 @@ class IXBrowserService:
         name: str,
         site_url: str = "chrome://newtab",
         group_id: int | None = None,
+        proxy_type: str | None = None,
+        proxy_ip: str | None = None,
+        proxy_port: str | int | None = None,
+        proxy_user: str | None = None,
+        proxy_password: str | None = None,
     ) -> dict[str, Any]:
         """Create one persistent iXBrowser profile using iX defaults.
 
-        Fingerprint and proxy values are intentionally not synthesized here.
-        Unspecified settings stay under iXBrowser's own defaults. Network and
-        credential configuration will be added through their own product
-        boundaries instead of leaking raw profile payloads into the React UI.
+        Fingerprint values are intentionally not synthesized here. Optional
+        SOCKS5 values are sent directly to iXBrowser through its official Proxy
+        entity and are not persisted by Social Publisher.
         """
 
         normalized_name = name.strip()
@@ -98,6 +102,29 @@ class IXBrowserService:
         profile.site_url = site_url.strip() or "chrome://newtab"
         if group_id is not None:
             profile.group_id = group_id
+
+        proxy_configured = any(
+            value not in (None, "")
+            for value in (proxy_type, proxy_ip, proxy_port, proxy_user, proxy_password)
+        )
+        if proxy_configured:
+            normalized_type = (proxy_type or "socks5").strip().lower()
+            if normalized_type != "socks5":
+                raise IXBrowserError("当前工作台仅开放 SOCKS5 自定义代理。")
+            normalized_ip = str(proxy_ip or "").strip()
+            normalized_port = str(proxy_port or "").strip()
+            if not normalized_ip or not normalized_port:
+                raise IXBrowserError("SOCKS5 需要同时填写 Host 和 Port。")
+
+            proxy = Proxy()
+            proxy.change_to_custom_mode(
+                proxy_type=Consts.PROXY_TYPE_SOCKS5,
+                proxy_ip=normalized_ip,
+                proxy_port=normalized_port,
+                proxy_user=(proxy_user or "").strip() or None,
+                proxy_password=proxy_password or None,
+            )
+            profile.proxy_config = proxy
 
         result = self.client.create_profile(profile)
         if result is None:
@@ -113,7 +140,49 @@ class IXBrowserService:
             "profile_id": profile_id,
             "name": normalized_name,
             "site_url": profile.site_url,
+            "proxy_configured": proxy_configured,
+            "proxy_type": "socks5" if proxy_configured else None,
         }
+
+    def update_profile_socks5_proxy(
+        self,
+        profile_id: int,
+        *,
+        proxy_ip: str,
+        proxy_port: str | int,
+        proxy_user: str | None = None,
+        proxy_password: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_ip = proxy_ip.strip()
+        normalized_port = str(proxy_port).strip()
+        if not normalized_ip or not normalized_port:
+            raise IXBrowserError("SOCKS5 需要同时填写 Host 和 Port。")
+
+        result = self.client.update_profile_to_custom_proxy_mode(
+            profile_id,
+            proxy_type=Consts.PROXY_TYPE_SOCKS5,
+            proxy_ip=normalized_ip,
+            proxy_port=normalized_port,
+            proxy_user=(proxy_user or "").strip() or None,
+            proxy_password=proxy_password or None,
+        )
+        if result is None:
+            self._raise_last_error(f"update SOCKS5 proxy for profile #{profile_id}")
+        return {
+            "profile_id": profile_id,
+            "proxy_type": "socks5",
+            "proxy_ip": normalized_ip,
+            "proxy_port": normalized_port,
+        }
+
+    def clear_profile_proxy(self, profile_id: int) -> dict[str, Any]:
+        result = self.client.update_profile_to_custom_proxy_mode(
+            profile_id,
+            proxy_type=Consts.PROXY_TYPE_DIRECT,
+        )
+        if result is None:
+            self._raise_last_error(f"clear proxy for profile #{profile_id}")
+        return {"profile_id": profile_id, "proxy_type": "direct"}
 
     @staticmethod
     def _extract_profile_id(result: object) -> int | None:

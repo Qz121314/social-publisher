@@ -1,0 +1,201 @@
+.account-table {
+  min-width: 1080px;
+}
+
+.account-row {
+  grid-template-columns: 34px minmax(165px, 1fr) 100px minmax(145px, .88fr) minmax(145px, .9fr) minmax(150px, .92fr) 135px;
+}
+
+.account-network-cell,
+.environment-network-cell {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 3px;
+}
+
+.account-network-cell strong,
+.environment-network-cell strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--sp-text);
+  font-size: 10px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-network-cell span,
+.environment-network-cell span {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-onboard-dialog {
+  width: min(700px, calc(100vw - 48px));
+}
+
+.account-onboard-body {
+  gap: 12px;
+  background: #fafbfc;
+}
+
+.account-onboard-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-surface);
+}
+
+.account-onboard-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--sp-divider);
+}
+
+.account-onboard-section-title strong {
+  color: var(--sp-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-onboard-section-title span,
+.account-onboard-hint {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.account-onboard-grid,
+.environment-proxy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.account-onboard-grid > label,
+.environment-proxy-grid > label {
+  min-width: 0;
+}
+
+.account-onboard-grid > label:first-child:last-child {
+  grid-column: 1 / -1;
+}
+
+.account-onboard-mode {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-sm);
+  background: var(--sp-surface-subtle);
+}
+
+.account-onboard-mode button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sp-text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.account-onboard-mode button.is-active {
+  background: var(--sp-surface);
+  color: var(--sp-text);
+  box-shadow: 0 0 0 1px var(--sp-border);
+  font-weight: 680;
+}
+
+.account-onboard-check {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: flex-start;
+  gap: 9px !important;
+}
+
+.account-onboard-check input {
+  width: 14px !important;
+  height: 14px !important;
+  flex: 0 0 14px;
+  margin: 2px 0 0 !important;
+  padding: 0 !important;
+  accent-color: var(--sp-accent);
+}
+
+.account-onboard-check > span {
+  display: grid;
+  gap: 3px;
+  color: var(--sp-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.account-onboard-check small {
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.environment-proxy-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius-md);
+  background: #fafbfc;
+}
+
+.environment-proxy-toggle {
+  margin-top: 0;
+  background: var(--sp-surface);
+}
+
+.environment-proxy-security {
+  margin: 0;
+  color: var(--sp-text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.environment-network-dialog {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.environment-actions {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1280px) {
+  .account-row {
+    grid-template-columns: 34px minmax(155px, 1fr) 90px minmax(130px, .85fr) minmax(130px, .85fr) minmax(135px, .9fr) 125px;
+  }
+}
+
+@media (max-width: 760px) {
+  .account-onboard-dialog,
+  .environment-network-dialog {
+    width: calc(100vw - 24px);
+  }
+
+  .account-onboard-grid,
+  .environment-proxy-grid {
+    grid-template-columns: 1fr;
+  }
+}

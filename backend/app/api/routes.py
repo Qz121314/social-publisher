@@ -12,7 +12,7 @@ from app.api.instagram_channels import router as instagram_channels_router
 from app.api.publish_targets import router as publish_targets_router
 from app.database import get_db
 from app.models.account import BrowserProfile
-from app.schemas.account import BrowserProfileRead
+from app.schemas.account import AccountProxyCreate, BrowserProfileRead
 from app.services.browser_sessions import BrowserSessionError, browser_sessions
 from app.services.ixbrowser import IXBrowserError, IXBrowserService
 from app.services.profile_locks import ProfileBusyError, profile_locks
@@ -46,7 +46,16 @@ class IXBrowserProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     site_url: str = Field(default="chrome://newtab", min_length=1, max_length=2048)
     group_id: int | None = Field(default=None, ge=1)
+    proxy: AccountProxyCreate = Field(default_factory=AccountProxyCreate)
     open_after_create: bool = True
+
+
+class IXBrowserProxyUpdate(BaseModel):
+    enabled: bool = True
+    host: str | None = Field(default=None, max_length=255)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=255)
+    password: str | None = Field(default=None, max_length=1024)
 
 
 @router.get("/status")
@@ -113,11 +122,17 @@ def create_ixbrowser_profile(
     """
 
     ix = IXBrowserService()
+    proxy = payload.proxy
     try:
         created = ix.create_profile(
             name=payload.name,
             site_url=payload.site_url,
             group_id=payload.group_id,
+            proxy_type=proxy.proxy_type if proxy.enabled else None,
+            proxy_ip=proxy.host if proxy.enabled else None,
+            proxy_port=proxy.port if proxy.enabled else None,
+            proxy_user=proxy.username if proxy.enabled else None,
+            proxy_password=proxy.password if proxy.enabled else None,
         )
     except IXBrowserError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -170,6 +185,7 @@ def create_ixbrowser_profile(
         "profile_id": profile_id,
         "name": created["name"],
         "site_url": created["site_url"],
+        "proxy_configured": bool(created.get("proxy_configured")),
         "synced": local_profile is not None,
         "opened": opened,
         "sync_error": sync_error,
@@ -190,6 +206,51 @@ def ixbrowser_sync(db: Session = Depends(get_db)) -> dict[str, object]:
 def browser_profiles(db: Session = Depends(get_db)) -> list[BrowserProfile]:
     statement = select(BrowserProfile).order_by(BrowserProfile.name, BrowserProfile.profile_id)
     return list(db.scalars(statement).all())
+
+
+@router.put("/browser-profiles/{profile_id}/proxy", response_model=BrowserProfileRead)
+def update_browser_profile_proxy(
+    profile_id: int,
+    payload: IXBrowserProxyUpdate,
+    db: Session = Depends(get_db),
+) -> BrowserProfile:
+    profile = _require_synced_profile(db, profile_id)
+    try:
+        profile_locks.assert_unlocked(db, profile_id)
+    except ProfileBusyError as exc:
+        raise HTTPException(status_code=409, detail="该环境正在执行任务，不能修改网络配置。") from exc
+
+    active_session = next(
+        (
+            item
+            for item in browser_sessions.list_sessions()
+            if item.get("profile_id") == profile_id and item.get("alive")
+        ),
+        None,
+    )
+    if active_session is not None:
+        raise HTTPException(status_code=409, detail="请先关闭该 iX 环境，再修改 SOCKS5。")
+
+    ix = IXBrowserService()
+    try:
+        if payload.enabled:
+            host = (payload.host or "").strip()
+            if not host or payload.port is None:
+                raise HTTPException(status_code=400, detail="SOCKS5 需要同时填写 Host 和 Port。")
+            ix.update_profile_socks5_proxy(
+                profile_id,
+                proxy_ip=host,
+                proxy_port=payload.port,
+                proxy_user=payload.username,
+                proxy_password=payload.password,
+            )
+        else:
+            ix.clear_profile_proxy(profile_id)
+        sync_ix_profiles(db)
+    except IXBrowserError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return db.get(BrowserProfile, profile_id) or profile
 
 
 @router.get("/browser-sessions")

@@ -21,6 +21,8 @@ SAFE_PROFILE_MIRROR_FIELDS = {
     "tag_name",
     "proxy_mode",
     "proxy_type",
+    "proxy_ip",
+    "proxy_port",
     "real_ip",
 }
 
@@ -28,9 +30,11 @@ SAFE_PROFILE_MIRROR_FIELDS = {
 def sanitize_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Keep only non-credential metadata in the local BrowserProfile mirror.
 
-    iXBrowser profile-list responses may contain saved account credentials and
-    TOTP values. Those fields must never be copied into our ordinary SQLite
-    profile mirror. Future credentials belong behind CredentialRef / Vault.
+    iXBrowser profile-list responses may contain saved account credentials,
+    TOTP values and proxy credentials. Those fields must never be copied into
+    our ordinary SQLite profile mirror. SOCKS5 host/port/type and detected exit
+    IP are safe operational metadata and are intentionally retained so the
+    workbench can show the network bound to each environment.
     """
 
     return {
