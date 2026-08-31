@@ -109,9 +109,18 @@ class LoginStateMachine:
             self.state = LoginState.NEEDS_REVIEW
         return self.state
 
-    def totp_result(self, success: bool) -> LoginState:
+    def totp_result(self, result: LoginResult) -> LoginState:
         self._require(LoginState.SUBMITTING_TOTP)
-        self.state = LoginState.VERIFYING_IDENTITY if success else LoginState.WAITING_FOR_USER
+        if result == LoginResult.SUCCESS:
+            self.state = LoginState.VERIFYING_IDENTITY
+        elif result == LoginResult.OTHER_MFA_REQUIRED:
+            self.state = LoginState.WAITING_FOR_USER
+        elif result == LoginResult.CHECKPOINT:
+            self.state = LoginState.CHECKPOINT
+        elif result == LoginResult.INVALID_CREDENTIALS:
+            self.state = LoginState.FAILED
+        else:
+            self.state = LoginState.NEEDS_REVIEW
         return self.state
 
     def identity_verified(self, matches: bool) -> LoginState:
