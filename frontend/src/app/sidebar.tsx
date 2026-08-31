@@ -11,7 +11,7 @@ type RuntimeStatus = {
 
 const navigation = [
   { to: '/', label: '工作台', icon: HomeIcon, match: ['/'] },
-  { to: '/accounts', label: '准备', icon: PrepareIcon, match: ['/accounts', '/assets', '/flows'] },
+  { to: '/prepare', label: '准备', icon: PrepareIcon, match: ['/prepare', '/accounts', '/assets', '/flows'] },
   { to: '/publish', label: '发布', icon: SendIcon, match: ['/publish', '/plans'] },
   { to: '/tasks', label: '运行', icon: RunIcon, match: ['/tasks'] },
   { to: '/review', label: '检查', icon: ReviewIcon, match: ['/review'] },
