@@ -42,10 +42,12 @@ def init_db() -> None:
     # Import every mapped domain before create_all so SQLAlchemy can resolve the
     # full relationship graph and create newly introduced lightweight tables.
     from app.models import account, channel, content, execution, flow, publish_target, publishing, settings  # noqa: F401
+    from app.services.account_schema import ensure_phase10_account_schema
     from app.services.domain_bootstrap import bootstrap_phase2_records, ensure_phase2_schema
     from app.services.platform_bootstrap import bootstrap_phase8_records
 
     Base.metadata.create_all(bind=engine)
+    ensure_phase10_account_schema(engine)
     rebuilt_publish_jobs = ensure_phase2_schema(engine)
     if rebuilt_publish_jobs:
         Base.metadata.create_all(bind=engine)

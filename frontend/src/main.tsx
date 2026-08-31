@@ -17,6 +17,7 @@ import './ui/primitives.css'
 import './app/desktop-shell.css'
 import './pages/Prepare/prepare.css'
 import './pages/Prepare/environment-create.css'
+import './pages/Prepare/social-accounts.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
