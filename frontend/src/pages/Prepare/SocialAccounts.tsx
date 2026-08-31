@@ -5,6 +5,7 @@ import InstagramChannelPanel from '../../InstagramChannelPanel'
 import { api } from '../../app/api'
 import { AccountIcon, PlusIcon, SearchIcon } from '../../ui/icons'
 import { Button, EmptyState, StatusChip, WorkspaceHeader } from '../../ui/components'
+import AccountAuthDrawer from './AccountAuthDrawer'
 import PrepareNav from './PrepareNav'
 
 type AccountGroup = {
@@ -65,7 +66,7 @@ function platformLabel(platform: string) {
 
 function loginStatus(status: string) {
   if (healthyStates.has(status)) return { label: '已登录', tone: 'success' as const }
-  if (status === 'needs_2fa') return { label: '需要 2FA', tone: 'warning' as const }
+  if (status === 'needs_2fa') return { label: '需要二次验证', tone: 'warning' as const }
   if (status === 'checkpoint') return { label: '安全检查', tone: 'warning' as const }
   if (status === 'needs_login') return { label: '需要登录', tone: 'warning' as const }
   if (['error', 'failed'].includes(status)) return { label: '异常', tone: 'danger' as const }
@@ -82,6 +83,7 @@ export default function SocialAccountsPage() {
   const [selected, setSelected] = useState<number[]>([])
   const [groupEditor, setGroupEditor] = useState<GroupEditor>(null)
   const [accountEditorOpen, setAccountEditorOpen] = useState(false)
+  const [authAccount, setAuthAccount] = useState<Account | null>(null)
   const [moveOpen, setMoveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -327,13 +329,13 @@ export default function SocialAccountsPage() {
               <SearchIcon />
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号、环境或发布身份…" />
             </div>
-            <span className="account-toolbar-note">登录恢复与批量任务引擎将在下一阶段接入这里。</span>
+            <span className="account-toolbar-note">登录凭据配置已接入；下一阶段会把“恢复登录”批量执行接到当前分组。</span>
           </div>
 
           {selected.length > 0 && (
             <div className="environment-selection-bar account-selection-bar">
               <strong>已选择 {selected.length} 个账号</strong>
-              <span>当前可直接执行账号组织操作；登录 / 检查 / 发布将复用同一选择状态。</span>
+              <span>当前可直接执行账号组织操作；登录、检查和发布将复用同一选择状态。</span>
               <div>
                 <Button onClick={() => setMoveOpen(true)}>移动分组</Button>
               </div>
@@ -360,7 +362,7 @@ export default function SocialAccountsPage() {
                   <div><input type="checkbox" checked={selectedSet.has(account.id)} onChange={() => toggleAccount(account.id)} aria-label={`选择 ${account.name}`} /></div>
                   <div className="account-primary-cell">
                     <span className="account-avatar"><AccountIcon /></span>
-                    <div><strong>{account.name}</strong><span>{platformLabel(account.platform)} · Account #{account.id}</span></div>
+                    <div><strong>{account.name}</strong><span>{platformLabel(account.platform)} · 账号 #{account.id}</span></div>
                   </div>
                   <div><span className="account-group-name">{account.group?.name || '未分组'}</span></div>
                   <div className="account-env-cell"><strong>{account.browser_profile.name}</strong><span>iX #{account.ix_profile_id}</span></div>
@@ -368,7 +370,10 @@ export default function SocialAccountsPage() {
                     {accountChannels.length === 0 ? <span>未配置</span> : accountChannels.slice(0, 2).map((channel) => <span key={channel.id}>{channel.target_name}</span>)}
                     {accountChannels.length > 2 && <small>+{accountChannels.length - 2}</small>}
                   </div>
-                  <div><StatusChip tone={status.tone}>{status.label}</StatusChip></div>
+                  <div className="account-login-cell">
+                    <StatusChip tone={status.tone}>{status.label}</StatusChip>
+                    <button type="button" className="account-login-settings" onClick={() => setAuthAccount(account)}>登录设置</button>
+                  </div>
                 </div>
               )
             })}
@@ -377,7 +382,7 @@ export default function SocialAccountsPage() {
       </section>
 
       <details className="account-advanced-tools">
-        <summary>高级：平台身份 / Channel 识别工具</summary>
+        <summary>高级：平台身份 / 发布身份识别工具</summary>
         <p>这些工具保留用于发现和确认真实发布身份，不参与日常账号分组操作。</p>
         <InstagramChannelPanel />
         <FacebookTargetPanel />
@@ -414,7 +419,7 @@ export default function SocialAccountsPage() {
                 <label><span>平台</span><select name="platform" defaultValue="facebook"><option value="facebook">Facebook</option><option value="instagram">Instagram</option></select></label>
                 <label><span>浏览器环境</span><select name="ix_profile_id" defaultValue="" required><option value="" disabled>选择固定 iX 环境</option>{profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · iX #{profile.profile_id}</option>)}</select></label>
                 <label><span>账号分组</span><select name="group_id" defaultValue={typeof scope === 'number' ? String(scope) : ''}><option value="">未分组</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-                <div className="account-dialog-hint">这里只建立账号 ↔ iX 环境的稳定绑定。Cookie、密码和 TOTP 不会在这个表单写入普通 SQLite。</div>
+                <div className="account-dialog-hint">这里只建立账号与 iX 环境的稳定绑定。Cookie、密码和 TOTP 动态验证码密钥不会写入普通 SQLite。</div>
               </div>
               <footer><Button type="button" onClick={() => setAccountEditorOpen(false)} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={busy || profiles.length === 0}>{busy ? '创建中…' : '添加账号'}</Button></footer>
             </form>
@@ -432,6 +437,14 @@ export default function SocialAccountsPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {authAccount && (
+        <AccountAuthDrawer
+          account={authAccount}
+          onClose={() => setAuthAccount(null)}
+          onSaved={setMessage}
+        />
       )}
     </main>
   )
