@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
-import { AssetIcon, HomeIcon, PrepareIcon, ReviewIcon, RunIcon, SearchIcon, SendIcon } from '../ui/icons'
+import { AssetIcon, BrowserIcon, HomeIcon, PrepareIcon, ReviewIcon, RunIcon, SearchIcon, SendIcon } from '../ui/icons'
 
 const actions = [
   { to: '/', label: '打开工作台', detail: '查看当前运行与待处理事项', icon: HomeIcon },
   { to: '/publish', label: '新建发布', detail: '选择内容、账号与发布时间', icon: SendIcon },
+  { to: '/prepare', label: '打开准备', detail: '检查浏览器、账号、素材和流程', icon: PrepareIcon },
+  { to: '/prepare/environments', label: '浏览器环境', detail: '管理 iXBrowser Profile 与会话', icon: BrowserIcon },
   { to: '/assets', label: '打开素材中心', detail: '管理文案、图片与视频', icon: AssetIcon },
-  { to: '/accounts', label: '打开准备', detail: '浏览器环境、账号与渠道', icon: PrepareIcon },
   { to: '/tasks', label: '查看运行', detail: '查看执行中的任务与历史', icon: RunIcon },
   { to: '/review', label: '查看需要处理', detail: '检查待确认和失败任务', icon: ReviewIcon },
 ]
