@@ -1,0 +1,70 @@
+.sp-review-page {
+  width: 100%;
+}
+
+.sp-review-list {
+  display: grid;
+}
+
+.sp-review-row {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--sp-divider);
+}
+
+.sp-review-row:last-child {
+  border-bottom: 0;
+}
+
+.sp-review-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--sp-radius-sm);
+  background: var(--sp-warning-soft);
+  color: var(--sp-warning);
+}
+
+.sp-review-icon.is-danger {
+  background: var(--sp-danger-soft);
+  color: var(--sp-danger);
+}
+
+.sp-review-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sp-review-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-review-copy p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--sp-text-secondary);
+  font-size: 10px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-review-copy small {
+  color: var(--sp-text-muted);
+  font-size: 9px;
+}
+
+.sp-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
