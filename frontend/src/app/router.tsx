@@ -12,6 +12,7 @@ import BrowserEnvironmentsPage from '../pages/Prepare/BrowserEnvironments'
 import ProxyPoolPage from '../pages/Prepare/ProxyPool'
 import PublisherPage from '../pages/Publisher'
 import ReviewPage from '../pages/Review'
+import RunCenterPage from '../pages/Run'
 import SettingsPage from '../pages/Settings'
 import TasksPage from '../pages/Tasks'
 
@@ -31,7 +32,8 @@ export default function AppRouter() {
           <Route path="flows" element={<FlowsPage />} />
           <Route path="publish" element={<PublisherPage />} />
           <Route path="plans" element={<PlansPage />} />
-          <Route path="tasks" element={<TasksPage />} />
+          <Route path="tasks" element={<RunCenterPage />} />
+          <Route path="tasks/publish" element={<TasksPage />} />
           <Route path="review" element={<ReviewPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
