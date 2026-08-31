@@ -7,8 +7,9 @@ import DashboardPage from '../pages/Dashboard'
 import FlowsPage from '../pages/Flows'
 import PlansPage from '../pages/Plans'
 import PreparePage from '../pages/Prepare'
+import AccountPoolPage from '../pages/Prepare/AccountPool'
 import BrowserEnvironmentsPage from '../pages/Prepare/BrowserEnvironments'
-import SocialAccountsPage from '../pages/Prepare/SocialAccounts'
+import ProxyPoolPage from '../pages/Prepare/ProxyPool'
 import PublisherPage from '../pages/Publisher'
 import ReviewPage from '../pages/Review'
 import SettingsPage from '../pages/Settings'
@@ -21,9 +22,10 @@ export default function AppRouter() {
         <Route element={<AdminLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="prepare" element={<PreparePage />} />
+          <Route path="prepare/proxies" element={<ProxyPoolPage />} />
+          <Route path="prepare/accounts" element={<AccountPoolPage />} />
           <Route path="prepare/environments" element={<BrowserEnvironmentsPage />} />
-          <Route path="prepare/network" element={<Navigate to="/prepare/environments" replace />} />
-          <Route path="prepare/accounts" element={<SocialAccountsPage />} />
+          <Route path="prepare/network" element={<Navigate to="/prepare/proxies" replace />} />
           <Route path="assets" element={<AssetsPage />} />
           <Route path="accounts" element={<Navigate to="/prepare/accounts" replace />} />
           <Route path="flows" element={<FlowsPage />} />

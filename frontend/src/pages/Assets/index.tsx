@@ -34,14 +34,14 @@ export default function AssetsPage() {
   return (
     <main className="v1-page">
       <PageHeader
-        eyebrow="素材中心"
-        title="内容资产"
-        description="管理文案和媒体资产。Phase 2 会把当前 ContentItem 正式解耦为 Asset / Content。"
+        eyebrow="准备"
+        title="素材池"
+        description="集中准备文案、图片和视频资源。后续 ContentPackage 会把这些资源组合成可直接用于批量任务的发布内容。"
         actions={<><PhaseBadge /><Link className="v1-link-button" to="/publish">使用素材发布</Link></>}
       />
 
       {error && <div className="notice">{error}</div>}
-      <p className="v1-inline-note">当前先以现有 ContentItem 作为素材视图的数据来源；这里不新增账号、时间或调度逻辑，避免在 Phase 1 固化旧模型。</p>
+      <p className="v1-inline-note">当前素材池继续复用现有 ContentItem 数据源；本轮先统一资源池产品边界，后续再增加文件夹 / ZIP / CSV 批量导入和 ContentPackage。</p>
 
       <section className="v1-panel">
         <div className="v1-toolbar">
@@ -50,10 +50,10 @@ export default function AssetsPage() {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>内容</th><th>平台</th><th>媒体</th><th>旧 Job</th><th>状态</th><th>创建时间</th></tr></thead>
+            <thead><tr><th>内容</th><th>平台</th><th>媒体</th><th>关联任务</th><th>状态</th><th>创建时间</th></tr></thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={6}><div className="empty-state compact-empty"><strong>暂无素材</strong><span>可以先到发布中心创建一条现有 PoC 草稿。</span></div></td></tr>
+                <tr><td colSpan={6}><div className="empty-state compact-empty"><strong>素材池为空</strong><span>后续可在这里批量导入文案、图片和视频。</span></div></td></tr>
               ) : filtered.map((item) => (
                 <tr key={item.id}>
                   <td><strong>{item.text.trim().slice(0, 72) || '仅媒体素材'}</strong><br /><small>#{item.id.slice(0, 8)}</small></td>

@@ -156,8 +156,21 @@ def account_secret_reference(account_id: int, kind: str) -> str:
     return f"social-publisher/account/{account_id}/{kind}"
 
 
+def proxy_secret_reference(proxy_id: int, kind: str) -> str:
+    if kind not in {"username", "password"}:
+        raise ValueError(f"unsupported proxy secret kind: {kind}")
+    return f"social-publisher/proxy/{proxy_id}/{kind}"
+
+
 def clear_account_secrets(account_id: int) -> int:
     removed = 0
     for kind in ("password", "totp", "cookies"):
         removed += int(credential_vault.delete(account_secret_reference(account_id, kind)))
+    return removed
+
+
+def clear_proxy_secrets(proxy_id: int) -> int:
+    removed = 0
+    for kind in ("username", "password"):
+        removed += int(credential_vault.delete(proxy_secret_reference(proxy_id, kind)))
     return removed

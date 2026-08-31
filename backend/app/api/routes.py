@@ -10,6 +10,7 @@ from app.api.facebook_flow_config import router as facebook_flow_config_router
 from app.api.facebook_probe import router as facebook_probe_router
 from app.api.instagram_channels import router as instagram_channels_router
 from app.api.publish_targets import router as publish_targets_router
+from app.api.resource_pools import router as resource_pools_router
 from app.database import get_db
 from app.models.account import BrowserProfile
 from app.schemas.account import AccountProxyCreate, BrowserProfileRead
@@ -27,6 +28,7 @@ from app.services.worker import worker_manager, worker_task_to_dict
 
 router = APIRouter()
 router.include_router(accounts_router)
+router.include_router(resource_pools_router)
 router.include_router(contents_router)
 router.include_router(domain_router)
 router.include_router(publish_targets_router)

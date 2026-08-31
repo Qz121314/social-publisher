@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
-import { AssetIcon, BrowserIcon, HomeIcon, PrepareIcon, ReviewIcon, RunIcon, SearchIcon, SendIcon } from '../ui/icons'
+import { AccountIcon, AssetIcon, BrowserIcon, HomeIcon, NetworkIcon, PrepareIcon, ReviewIcon, RunIcon, SearchIcon, SendIcon } from '../ui/icons'
 
 const actions = [
   { to: '/', label: '打开工作台', detail: '查看当前运行与待处理事项', icon: HomeIcon },
-  { to: '/publish', label: '新建发布', detail: '选择内容、账号与发布时间', icon: SendIcon },
-  { to: '/prepare', label: '打开准备', detail: '检查浏览器、账号、素材和流程', icon: PrepareIcon },
-  { to: '/prepare/environments', label: '浏览器环境', detail: '管理 iXBrowser Profile 与会话', icon: BrowserIcon },
-  { to: '/assets', label: '打开素材中心', detail: '管理文案、图片与视频', icon: AssetIcon },
+  { to: '/publish', label: '新建发布', detail: '选择内容、账号分组与发布时间', icon: SendIcon },
+  { to: '/prepare', label: '打开准备', detail: '查看 IP池、账号池、素材池和流程', icon: PrepareIcon },
+  { to: '/prepare/proxies', label: '打开 IP池', detail: '批量导入和管理 SOCKS5', icon: NetworkIcon },
+  { to: '/prepare/accounts', label: '打开账号池', detail: '批量导入账号、分组和分配 IP', icon: AccountIcon },
+  { to: '/assets', label: '打开素材池', detail: '管理文案、图片、视频与内容组合', icon: AssetIcon },
+  { to: '/prepare/environments', label: '高级：浏览器环境', detail: '查看 iXBrowser Profile 与会话诊断', icon: BrowserIcon },
   { to: '/tasks', label: '查看运行', detail: '查看执行中的任务与历史', icon: RunIcon },
   { to: '/review', label: '查看需要处理', detail: '检查待确认和失败任务', icon: ReviewIcon },
 ]
@@ -51,7 +53,7 @@ export default function CommandPalette() {
     <>
       <button className="sp-command-trigger" type="button" onClick={() => setOpen(true)} aria-label="打开命令面板">
         <SearchIcon />
-        <span>搜索环境、账号、内容、任务…</span>
+        <span>搜索账号、IP、素材、任务…</span>
         <kbd>Ctrl K</kbd>
       </button>
 

@@ -2,43 +2,26 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api } from '../../app/api'
-import { AccountIcon, AssetIcon, BrowserIcon, FlowIcon } from '../../ui/icons'
+import { AccountIcon, AssetIcon, FlowIcon, NetworkIcon } from '../../ui/icons'
 import { Button, Panel, StatusChip, WorkspaceHeader } from '../../ui/components'
 import PrepareNav from './PrepareNav'
-
-type RuntimeStatus = {
-  app?: string
-  ixbrowser?: { connected?: boolean; total_profiles?: number; message?: string | null }
-  browser_pool?: { total_sessions?: number; warm_sessions?: number }
-}
-
-type BrowserProfile = {
-  profile_id: number
-  name: string
-  group_name?: string | null
-  proxy_type?: string | null
-  proxy_ip?: string | null
-  proxy_port?: string | null
-  real_ip?: string | null
-  is_available: boolean
-}
 
 type Account = {
   id: number
   enabled: boolean
   status: string
+  proxy_id?: number | null
+  ix_profile_id?: number | null
 }
 
-type Channel = {
-  id: string
-  profile_id: number
-  platform: string
+type ProxyEndpoint = {
+  id: number
+  status: string
   enabled: boolean
-  health_status: string
+  assigned_count: number
 }
 
 type Asset = { id: string }
-
 type Flow = { id: string; enabled: boolean; current_revision_id?: string | null }
 
 type ReadinessItem = {
@@ -52,31 +35,23 @@ type ReadinessItem = {
   meta: string
 }
 
-const loggedInStates = new Set(['logged_in', 'healthy', 'ok', 'ready'])
-
 export default function PreparePage() {
-  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
-  const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [channels, setChannels] = useState<Channel[]>([])
+  const [proxies, setProxies] = useState<ProxyEndpoint[]>([])
   const [assets, setAssets] = useState<Asset[]>([])
   const [flows, setFlows] = useState<Flow[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
     try {
-      const [nextRuntime, nextProfiles, nextAccounts, nextChannels, nextAssets, nextFlows] = await Promise.all([
-        api<RuntimeStatus>('/api/status'),
-        api<BrowserProfile[]>('/api/browser-profiles'),
+      const [nextAccounts, nextProxies, nextAssets, nextFlows] = await Promise.all([
         api<Account[]>('/api/accounts'),
-        api<Channel[]>('/api/channels'),
+        api<ProxyEndpoint[]>('/api/proxy-pool'),
         api<Asset[]>('/api/assets?limit=100'),
         api<Flow[]>('/api/flows'),
       ])
-      setRuntime(nextRuntime)
-      setProfiles(nextProfiles)
       setAccounts(nextAccounts)
-      setChannels(nextChannels)
+      setProxies(nextProxies)
       setAssets(nextAssets)
       setFlows(nextFlows)
       setError(null)
@@ -92,74 +67,65 @@ export default function PreparePage() {
   }, [])
 
   const items = useMemo<ReadinessItem[]>(() => {
-    const availableProfiles = profiles.filter((item) => item.is_available).length
-    const socks5Profiles = profiles.filter((item) => item.proxy_type === 'socks5' && item.proxy_ip && item.proxy_port).length
-    const detectedExitIps = profiles.filter((item) => item.real_ip).length
     const enabledAccounts = accounts.filter((item) => item.enabled)
-    const loggedInAccounts = enabledAccounts.filter((item) => loggedInStates.has(item.status)).length
-    const healthyChannels = channels.filter((item) => item.enabled && ['healthy', 'ok', 'running'].includes(item.health_status)).length
-    const enabledChannels = channels.filter((item) => item.enabled).length
+    const assignedAccounts = enabledAccounts.filter((item) => item.proxy_id).length
+    const materializedAccounts = enabledAccounts.filter((item) => item.ix_profile_id).length
+    const enabledProxies = proxies.filter((item) => item.enabled)
+    const assignedProxies = enabledProxies.filter((item) => item.assigned_count > 0).length
+    const errorProxies = enabledProxies.filter((item) => item.status === 'error').length
     const activeFlows = flows.filter((item) => item.enabled && item.current_revision_id).length
-
-    const browserTone = runtime?.ixbrowser?.connected && availableProfiles > 0 ? 'success' : 'danger'
-    const accountTone = enabledAccounts.length > 0 && loggedInAccounts === enabledAccounts.length ? 'success' : 'warning'
-    const assetTone = assets.length > 0 ? 'success' : 'warning'
-    const flowTone = activeFlows > 0 ? 'success' : 'warning'
 
     return [
       {
-        key: 'browser',
-        title: '浏览器环境 + SOCKS5',
-        description: 'iXBrowser Profile、SOCKS5、出口 IP 与真实浏览器会话统一管理。',
-        href: '/prepare/environments',
-        icon: BrowserIcon,
-        tone: browserTone,
-        status: browserTone === 'success' ? '已连接' : '需要检查',
-        meta: runtime?.ixbrowser?.connected
-          ? `${availableProfiles} / ${profiles.length} 个环境可用 · ${socks5Profiles} 个配置 SOCKS5 · ${detectedExitIps} 个有出口 IP`
-          : 'iXBrowser Local API 未连接',
+        key: 'proxy-pool',
+        title: 'IP池',
+        description: '批量导入 SOCKS5，统一管理分配和网络健康状态。',
+        href: '/prepare/proxies',
+        icon: NetworkIcon,
+        tone: enabledProxies.length > 0 && errorProxies === 0 ? 'success' : 'warning',
+        status: enabledProxies.length > 0 ? '已有资源' : '需要导入',
+        meta: `${enabledProxies.length} 条可用记录 · ${assignedProxies} 条已分配 · ${errorProxies} 条异常`,
       },
       {
-        key: 'accounts',
-        title: '社交账号',
-        description: '创建账号时直接创建/绑定 iX 环境、配置 SOCKS5，并在真实窗口完成登录。',
+        key: 'account-pool',
+        title: '账号池',
+        description: '批量准备账号、Cookie、密码、2FA、分组和固定 IP。',
         href: '/prepare/accounts',
         icon: AccountIcon,
-        tone: accountTone,
-        status: accountTone === 'success' ? '已登录' : '需要准备',
-        meta: `${enabledAccounts.length} 个启用账号 · ${loggedInAccounts} 个已登录 · ${healthyChannels} / ${enabledChannels} 个 Channel 正常`,
+        tone: enabledAccounts.length > 0 ? 'success' : 'warning',
+        status: enabledAccounts.length > 0 ? '已有账号' : '需要导入',
+        meta: `${enabledAccounts.length} 个账号 · ${assignedAccounts} 个已分配 IP · ${materializedAccounts} 个已有 iX 环境`,
       },
       {
-        key: 'assets',
-        title: '素材中心',
-        description: '提前准备文案、图片、视频与后续 ContentPackage。',
+        key: 'asset-pool',
+        title: '素材池',
+        description: '准备文案、图片、视频和后续可复用的内容组合。',
         href: '/assets',
         icon: AssetIcon,
-        tone: assetTone,
-        status: assetTone === 'success' ? '有可用素材' : '暂无素材',
+        tone: assets.length > 0 ? 'success' : 'warning',
+        status: assets.length > 0 ? '已有素材' : '需要导入',
         meta: `${assets.length} 条当前可读取素材记录`,
       },
       {
         key: 'flows',
         title: '自动化流程',
-        description: '平台发布流程、稳定 Revision 与高级诊断配置。',
+        description: '登录、账号维护和发布任务复用的稳定执行流程。',
         href: '/flows',
         icon: FlowIcon,
-        tone: flowTone,
-        status: flowTone === 'success' ? '已验证' : '需要配置',
+        tone: activeFlows > 0 ? 'success' : 'warning',
+        status: activeFlows > 0 ? '已配置' : '需要配置',
         meta: `${activeFlows} 个启用且绑定当前 Revision 的流程`,
       },
     ]
-  }, [runtime, profiles, accounts, channels, assets, flows])
+  }, [accounts, proxies, assets, flows])
 
   const readyCount = items.filter((item) => item.tone === 'success').length
-  const allReady = readyCount === items.length
 
   return (
     <main className="prepare-workspace">
       <WorkspaceHeader
         title="准备"
-        description="账号、iX 环境、SOCKS5 和登录现在按同一条工作流准备，不再拆成独立网络中心。"
+        description="先准备资源池，再创建批量任务。iXBrowser 是运行时基础设施，不再作为账号录入的前置步骤。"
         actions={<Button variant="primary" onClick={load}>重新检查</Button>}
       />
       <PrepareNav />
@@ -168,14 +134,14 @@ export default function PreparePage() {
 
       <div className="prepare-overview-summary">
         <div>
-          <span>整体准备度</span>
+          <span>资源准备度</span>
           <strong>{readyCount} / {items.length}</strong>
-          <small>网络是 iX 浏览器环境的一部分：工作台只展示安全的 SOCKS5 Host / Port 与出口 IP，不显示代理密码。</small>
+          <small>正式路径：IP池 → 账号池 → 素材池 → 创建任务 → 系统执行 → 只处理异常。</small>
         </div>
-        <StatusChip tone={allReady ? 'success' : 'warning'}>{allReady ? '已具备发布条件' : '存在未完成准备项'}</StatusChip>
+        <StatusChip tone={readyCount >= 3 ? 'success' : 'warning'}>{readyCount >= 3 ? '资源基础已具备' : '仍有资源需要准备'}</StatusChip>
       </div>
 
-      <Panel title="发布前条件" meta="按真实运行依赖排序">
+      <Panel title="资源池" meta="批量导入 · 批量操作 · 任务复用">
         <div className="prepare-readiness-list">
           {items.map((item) => {
             const Icon = item.icon
@@ -193,6 +159,10 @@ export default function PreparePage() {
           })}
         </div>
       </Panel>
+
+      <div className="prepare-advanced-runtime-link">
+        <Link to="/prepare/environments">高级：查看 iXBrowser 运行环境</Link>
+      </div>
     </main>
   )
 }

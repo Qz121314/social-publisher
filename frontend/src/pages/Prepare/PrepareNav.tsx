@@ -3,9 +3,9 @@ import { NavLink } from 'react-router-dom'
 
 const items = [
   { to: '/prepare', label: '概览', end: true },
-  { to: '/prepare/environments', label: '浏览器环境' },
-  { to: '/prepare/accounts', label: '社交账号' },
-  { to: '/assets', label: '素材中心' },
+  { to: '/prepare/proxies', label: 'IP池' },
+  { to: '/prepare/accounts', label: '账号池' },
+  { to: '/assets', label: '素材池' },
   { to: '/flows', label: '自动化流程' },
 ]
 
