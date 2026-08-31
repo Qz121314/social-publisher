@@ -26,6 +26,32 @@ class BrowserProfile(Base):
     accounts: Mapped[list["Account"]] = relationship(back_populates="browser_profile")
 
 
+class AccountGroup(Base):
+    """User-owned business grouping for social accounts.
+
+    This is intentionally independent from iXBrowser's own Profile groups. A
+    group is an operational selection unit for future batch login, checks and
+    publishing tasks.
+    """
+
+    __tablename__ = "account_groups"
+    __table_args__ = (UniqueConstraint("name", name="uq_account_groups_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    accounts: Mapped[list["Account"]] = relationship(back_populates="group")
+
+
 class Account(Base):
     __tablename__ = "accounts"
     __table_args__ = (
@@ -40,6 +66,11 @@ class Account(Base):
         nullable=False,
         index=True,
     )
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -51,3 +82,4 @@ class Account(Base):
     )
 
     browser_profile: Mapped[BrowserProfile] = relationship(back_populates="accounts")
+    group: Mapped[AccountGroup | None] = relationship(back_populates="accounts")
