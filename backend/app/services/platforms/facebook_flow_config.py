@@ -50,6 +50,12 @@ DEFAULT_FACEBOOK_FLOW: dict[str, list[str]] = {
         "发布",
         "Post",
     ],
+    "publish_original_keywords": [
+        "发布原帖",
+        "发布原始帖子",
+        "Publish original post",
+        "Publish Original Post",
+    ],
     "upload_busy_keywords": [
         "正在上传",
         "正在处理",
